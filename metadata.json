@@ -1,0 +1,6 @@
+{
+  "name": "OmniConverter & File Suite",
+  "description": "Unified file management dashboard featuring YouTube & MP4 converters, Excel password removal, PDF & document tools, image collage & compression, batch processing, secure storage with permissions, and AI OCR.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
