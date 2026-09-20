@@ -1,11 +1,6 @@
 import express from "express";
 import path from "path";
-import { fileURLToPath } from "url";
 import { GoogleGenAI } from "@google/genai";
-import { createServer as createViteServer } from "vite";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = 3000;
@@ -40,6 +35,7 @@ app.get("/api/health", (_req, res) => {
 
 // YouTube metadata & download simulator / extractor
 app.post("/api/youtube/info", async (req, res) => {
+  console.log("[api/youtube/info] request received");
   try {
     const { url } = req.body;
     if (!url || typeof url !== "string") {
@@ -98,6 +94,7 @@ app.post("/api/youtube/info", async (req, res) => {
       formats,
     });
   } catch (error: any) {
+    console.error("[api/youtube/info] request failed", error);
     res.status(500).json({ error: error.message || "Failed to process YouTube link" });
   }
 });
@@ -402,6 +399,7 @@ function generateLocalTextSuggestions(text: string, customGoal?: string) {
 
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -420,4 +418,10 @@ async function startServer() {
   });
 }
 
-startServer();
+// Vercel imports the Express app as a serverless handler. Local development and
+// the production `npm start` command still launch the long-running HTTP server.
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
