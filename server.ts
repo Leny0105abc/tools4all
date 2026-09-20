@@ -4,7 +4,7 @@ import { Readable } from "stream";
 import { GoogleGenAI } from "@google/genai";
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 let youtubeClientPromise: Promise<import("youtubei.js").Innertube> | null = null;
 
