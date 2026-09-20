@@ -1,9 +1,42 @@
 import express from "express";
 import path from "path";
+import { Readable } from "stream";
 import { GoogleGenAI } from "@google/genai";
 
 const app = express();
 const PORT = 3000;
+
+let youtubeClientPromise: Promise<import("youtubei.js").Innertube> | null = null;
+
+function getYoutubeClient() {
+  if (!youtubeClientPromise) {
+    youtubeClientPromise = import("youtubei.js").then(({ Innertube, UniversalCache }) =>
+      Innertube.create({
+        cache: new UniversalCache(false),
+        generate_session_locally: true,
+      })
+    );
+  }
+  return youtubeClientPromise;
+}
+
+function extractYouTubeVideoId(input: string): string | null {
+  try {
+    const parsed = new URL(input);
+    const host = parsed.hostname.replace(/^www\./, "");
+    const candidate = host === "youtu.be"
+      ? parsed.pathname.split("/").filter(Boolean)[0]
+      : host.endsWith("youtube.com")
+        ? parsed.pathname.startsWith("/shorts/") || parsed.pathname.startsWith("/embed/")
+          ? parsed.pathname.split("/").filter(Boolean)[1]
+          : parsed.searchParams.get("v")
+        : null;
+
+    return candidate && /^[\w-]{11}$/.test(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -42,10 +75,10 @@ app.post("/api/youtube/info", async (req, res) => {
       return res.status(400).json({ error: "Please provide a valid YouTube URL" });
     }
 
-    // Extract video ID
-    const regExp = /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/;
-    const match = url.match(regExp);
-    const videoId = match ? match[1] : null;
+    const videoId = extractYouTubeVideoId(url);
+    if (!videoId) {
+      return res.status(400).json({ error: "Please provide a valid YouTube video or Shorts URL" });
+    }
 
     let title = "YouTube Video Stream";
     let author = "Content Creator";
@@ -55,38 +88,27 @@ app.post("/api/youtube/info", async (req, res) => {
     // Attempt to fetch real oEmbed title and author
     try {
       const oembedRes = await fetch(
-        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId || "dQw4w9WgXcQ"}&format=json`
+        `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
       );
       if (oembedRes.ok) {
         const oembedData = await oembedRes.json();
         title = oembedData.title || title;
         author = oembedData.author_name || author;
-        if (videoId) {
-          thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-        }
-      } else if (videoId) {
+        thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+      } else {
         thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
         title = `Video (${videoId})`;
       }
     } catch {
-      if (videoId) {
-        thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-      }
+      thumbnail = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
     }
 
     const formats = [
-      { id: "mp4-1080", format: "MP4", quality: "1080p Full HD", type: "video", size: "64.2 MB", ext: "mp4" },
-      { id: "mp4-720", format: "MP4", quality: "720p HD", type: "video", size: "32.8 MB", ext: "mp4" },
-      { id: "mp4-480", format: "MP4", quality: "480p Standard", type: "video", size: "18.5 MB", ext: "mp4" },
-      { id: "mp3-320", format: "MP3", quality: "320 kbps (HQ Audio)", type: "audio", size: "8.6 MB", ext: "mp3" },
-      { id: "mp3-192", format: "MP3", quality: "192 kbps (Standard Audio)", type: "audio", size: "5.2 MB", ext: "mp3" },
-      { id: "webm", format: "WEBM", quality: "1080p 60fps", type: "video", size: "48.1 MB", ext: "webm" },
-      { id: "m4a", format: "M4A", quality: "256 kbps (AAC)", type: "audio", size: "6.9 MB", ext: "m4a" },
-      { id: "wav", format: "WAV", quality: "Lossless Audio", type: "audio", size: "38.4 MB", ext: "wav" },
+      { id: "mp4-360", itag: 18, format: "MP4", quality: "360p with audio", type: "video", size: "Original stream", ext: "mp4" },
     ];
 
     res.json({
-      videoId: videoId || "dQw4w9WgXcQ",
+      videoId,
       title,
       author,
       thumbnail,
@@ -99,63 +121,57 @@ app.post("/api/youtube/info", async (req, res) => {
   }
 });
 
-// Download endpoint generating local media file download
-app.get("/api/youtube/download", (req, res) => {
-  const { title = "media_download", format = "mp3", quality = "320" } = req.query;
-  const safeTitle = (String(title) || "download")
-    .replace(/[^a-zA-Z0-9_-]/g, "_")
-    .substring(0, 50);
-  const ext = String(format).toLowerCase();
+// Stream original YouTube media bytes without transcoding.
+app.get("/api/youtube/download", async (req, res) => {
+  const videoId = String(req.query.videoId || "");
+  const itag = Number(req.query.itag);
+  const title = String(req.query.title || "media_download");
+  const selections = {
+    18: { client: "ANDROID" as const, ext: "mp4", contentType: "video/mp4" },
+  };
+  const selection = selections[itag as keyof typeof selections];
 
-  // Set response headers for file download
-  res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.${ext}"`);
+  if (!/^[\w-]{11}$/.test(videoId) || !selection) {
+    return res.status(400).json({ error: "Invalid video or media format" });
+  }
 
-  if (ext === "mp3" || ext === "wav" || ext === "m4a") {
-    res.setHeader("Content-Type", ext === "wav" ? "audio/wav" : "audio/mpeg");
-    // Generate a valid audio tone WAV header + silence/sine tone byte stream
-    const sampleRate = 44100;
-    const numChannels = 2;
-    const bitsPerSample = 16;
-    const durationSeconds = 3;
-    const numSamples = sampleRate * durationSeconds;
-    const dataSize = numSamples * numChannels * (bitsPerSample / 8);
-    const buffer = Buffer.alloc(44 + dataSize);
+  const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 80) || "download";
+  console.log("[api/youtube/download] stream requested", { videoId, itag });
 
-    // RIFF header
-    buffer.write("RIFF", 0);
-    buffer.writeUInt32LE(36 + dataSize, 4);
-    buffer.write("WAVE", 8);
-    buffer.write("fmt ", 12);
-    buffer.writeUInt32LE(16, 16);
-    buffer.writeUInt16LE(1, 20); // PCM
-    buffer.writeUInt16LE(numChannels, 22);
-    buffer.writeUInt32LE(sampleRate, 24);
-    buffer.writeUInt32LE(sampleRate * numChannels * (bitsPerSample / 8), 28);
-    buffer.writeUInt16LE(numChannels * (bitsPerSample / 8), 32);
-    buffer.writeUInt16LE(bitsPerSample, 34);
-    buffer.write("data", 36);
-    buffer.writeUInt32LE(dataSize, 40);
-
-    // Generate gentle harmonic audio
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
-      const val = Math.sin(2 * Math.PI * 440 * t) * 0.4 * 32767;
-      const offset = 44 + i * 4;
-      buffer.writeInt16LE(Math.round(val), offset);
-      buffer.writeInt16LE(Math.round(val), offset + 2);
+  try {
+    const youtube = await getYoutubeClient();
+    const format = await youtube.getStreamingData(videoId, {
+      client: selection.client,
+      itag,
+    });
+    if (!format.url) {
+      throw new Error("YouTube did not provide a downloadable URL for this format");
     }
-    return res.end(buffer);
-  } else {
-    // Return sample mp4 container bytes
-    res.setHeader("Content-Type", "video/mp4");
-    // Simple MP4 ftyp box to ensure valid recognizable video file
-    const ftypBox = Buffer.from([
-      0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70, // size 32, 'ftyp'
-      0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00, // isom
-      0x69, 0x73, 0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32,
-      0x61, 0x76, 0x63, 0x31, 0x6d, 0x70, 0x34, 0x31,
-    ]);
-    return res.end(ftypBox);
+    const upstream = await fetch(format.url, {
+      headers: req.headers.range ? { Range: req.headers.range } : undefined,
+    });
+
+    if (!upstream.ok || !upstream.body) {
+      throw new Error(`YouTube media request failed with status ${upstream.status}`);
+    }
+
+    res.status(upstream.status);
+    res.setHeader("Content-Type", upstream.headers.get("content-type") || selection.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeTitle}.${selection.ext}"`);
+    res.setHeader("Accept-Ranges", "bytes");
+
+    for (const header of ["content-length", "content-range"]) {
+      const value = upstream.headers.get(header);
+      if (value) res.setHeader(header, value);
+    }
+
+    Readable.fromWeb(upstream.body as any).pipe(res);
+  } catch (error) {
+    console.error("[api/youtube/download] stream failed", { videoId, itag, error });
+    if (!res.headersSent) {
+      return res.status(502).json({ error: "Could not retrieve this media stream. Please try again." });
+    }
+    res.end();
   }
 });
 

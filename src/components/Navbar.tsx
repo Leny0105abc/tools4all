@@ -33,7 +33,7 @@ export default function Navbar({
   const [searchOpen, setSearchOpen] = useState(false);
 
   const toolIndex: { id: ToolId; title: string; category: string }[] = [
-    { id: "youtube-converter", title: "YouTube to MP4 / MP3", category: "Media" },
+    { id: "youtube-converter", title: "YouTube Video Download", category: "Media" },
     { id: "mp4-to-mp3", title: "MP4 to MP3 Extractor", category: "Media" },
     { id: "name-text-converter", title: "Name & Text Format Converter", category: "Text" },
     { id: "excel-unlocker", title: "Excel Password Unlocker", category: "Spreadsheet" },

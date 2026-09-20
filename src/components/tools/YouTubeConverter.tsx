@@ -14,6 +14,7 @@ import {
 
 interface VideoFormat {
   id: string;
+  itag: number;
   format: string;
   quality: string;
   type: "video" | "audio";
@@ -71,45 +72,55 @@ export default function YouTubeConverter() {
     }
   };
 
-  const handleDownload = (format: VideoFormat) => {
+  const handleDownload = async (format: VideoFormat) => {
     if (!videoInfo) return;
     setDownloadingId(format.id);
-    setDownloadProgress(15);
+    setDownloadProgress(5);
     setDownloadSuccess(null);
+    setError(null);
 
-    const interval = setInterval(() => {
-      setDownloadProgress((prev) => {
-        if (prev >= 90) {
-          clearInterval(interval);
-          return 90;
-        }
-        return prev + 25;
+    try {
+      const params = new URLSearchParams({
+        videoId: videoInfo.videoId,
+        itag: String(format.itag),
+        title: videoInfo.title,
       });
-    }, 200);
+      const response = await fetch(`/api/youtube/download?${params}`);
+      if (!response.ok || !response.body) {
+        const body = await response.json().catch(() => null);
+        throw new Error(body?.error || "Could not download this media stream.");
+      }
 
-    setTimeout(() => {
-      clearInterval(interval);
-      setDownloadProgress(100);
+      const total = Number(response.headers.get("content-length")) || 0;
+      const reader = response.body.getReader();
+      const chunks: ArrayBuffer[] = [];
+      let received = 0;
 
-      // Trigger local download via download endpoint
-      const downloadUrl = `/api/youtube/download?title=${encodeURIComponent(
-        videoInfo.title
-      )}&format=${format.ext}&quality=${encodeURIComponent(format.quality)}`;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value.slice().buffer as ArrayBuffer);
+        received += value.length;
+        setDownloadProgress(total ? Math.min(95, Math.round((received / total) * 100)) : 50);
+      }
 
+      const blob = new Blob(chunks, { type: response.headers.get("content-type") || "application/octet-stream" });
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = downloadUrl;
+      a.href = objectUrl;
       a.download = `${videoInfo.title.replace(/[^a-zA-Z0-9_-]/g, "_")}.${format.ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 
-      setTimeout(() => {
-        setDownloadingId(null);
-        setDownloadSuccess(
-          `Successfully converted and saved ${format.format} (${format.quality}) to your local storage.`
-        );
-      }, 500);
-    }, 1200);
+      setDownloadProgress(100);
+      setDownloadSuccess(`Saved ${format.format} (${format.quality}) to your device.`);
+    } catch (err: any) {
+      setError(err.message || "Failed to download the media file.");
+    } finally {
+      setDownloadingId(null);
+    }
   };
 
   const filteredFormats = videoInfo?.formats.filter((f) => {
@@ -117,6 +128,7 @@ export default function YouTubeConverter() {
     if (activeTab === "audio") return f.type === "audio";
     return true;
   });
+  const hasAudioFormats = videoInfo?.formats.some((format) => format.type === "audio");
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -128,11 +140,11 @@ export default function YouTubeConverter() {
               <Youtube className="w-5 h-5" />
             </div>
             <h1 className="text-xl font-bold tracking-tight text-neutral-900 dark:text-white">
-              YouTube to MP4, MP3 & Media Formats
+              YouTube Video Downloader
             </h1>
           </div>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-            Convert online video streams directly into high-fidelity MP4, MP3, WEBM, WAV and save them to local storage.
+            Save a playable MP4 stream with video and audio for offline use where permitted.
           </p>
         </div>
       </div>
@@ -260,17 +272,19 @@ export default function YouTubeConverter() {
                 <Video className="w-3.5 h-3.5" />
                 <span>Video (MP4)</span>
               </button>
-              <button
-                onClick={() => setActiveTab("audio")}
-                className={`px-3 py-1.5 min-h-[36px] rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                  activeTab === "audio"
-                    ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900"
-                    : "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                }`}
-              >
-                <Music className="w-3.5 h-3.5" />
-                <span>Audio (MP3)</span>
-              </button>
+              {hasAudioFormats && (
+                <button
+                  onClick={() => setActiveTab("audio")}
+                  className={`px-3 py-1.5 min-h-[36px] rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                    activeTab === "audio"
+                      ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900"
+                      : "text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  }`}
+                >
+                  <Music className="w-3.5 h-3.5" />
+                  <span>Audio</span>
+                </button>
+              )}
             </div>
             <span className="text-[11px] text-neutral-400 hidden md:inline shrink-0 pl-2">
               {filteredFormats?.length || 0} options available
@@ -306,7 +320,7 @@ export default function YouTubeConverter() {
                         </span>
                       </div>
                       <span className="text-[10px] text-neutral-400 font-mono">
-                        Approx: {fmt.size}
+                        Source: {fmt.size}
                       </span>
                     </div>
                   </div>

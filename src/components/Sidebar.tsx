@@ -50,7 +50,7 @@ export default function Sidebar({
       items: [
         {
           id: "youtube-converter" as ToolId,
-          label: "YouTube to MP4 / MP3",
+          label: "YouTube Video Download",
           icon: Youtube,
           badge: "Local Save",
         },

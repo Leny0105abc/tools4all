@@ -34,8 +34,8 @@ export default function Dashboard({ onSelectTool }: DashboardProps) {
   }[] = [
     {
       id: "youtube-converter",
-      title: "YouTube to MP4 & MP3",
-      description: "Download and convert YouTube videos to MP4, MP3, and 1080p formats saved directly to local disk.",
+      title: "YouTube Video Download",
+      description: "Save a playable MP4 stream with video and audio directly to your device.",
       icon: Youtube,
       badge: "Media Stream",
       color: "from-red-500/10 to-red-500/5 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/50",
