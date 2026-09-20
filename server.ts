@@ -10,12 +10,13 @@ let youtubeClientPromise: Promise<import("youtubei.js").Innertube> | null = null
 
 function getYoutubeClient() {
   if (!youtubeClientPromise) {
-    youtubeClientPromise = import("youtubei.js").then(({ Innertube, UniversalCache }) =>
-      Innertube.create({
+    youtubeClientPromise = import("youtubei.js").then(({ Innertube, Platform, UniversalCache }) => {
+      Platform.shim.eval = async (data) => new Function(data.output)();
+      return Innertube.create({
         cache: new UniversalCache(false),
         generate_session_locally: true,
-      })
-    );
+      });
+    });
   }
   return youtubeClientPromise;
 }
@@ -143,12 +144,19 @@ app.get("/api/youtube/download", async (req, res) => {
     stage = "creating-client";
     const youtube = await getYoutubeClient();
     stage = "resolving-stream";
-    const format = await youtube.getStreamingData(videoId, {
-      client: selection.client,
-      itag,
-    });
-    if (!format.url) {
-      throw new Error("YouTube did not provide a downloadable URL for this format");
+    const clients = [selection.client, "MWEB", "IOS", "WEB"] as const;
+    let format: Awaited<ReturnType<typeof youtube.getStreamingData>> | null = null;
+    const resolutionErrors: string[] = [];
+    for (const client of clients) {
+      try {
+        format = await youtube.getStreamingData(videoId, { client, itag });
+        if (format.url) break;
+      } catch (error) {
+        resolutionErrors.push(`${client}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (!format?.url) {
+      throw new Error(resolutionErrors.join("; ") || "YouTube did not provide a downloadable URL for this format");
     }
     stage = "fetching-media";
     const upstream = await fetch(format.url, {
