@@ -137,9 +137,12 @@ app.get("/api/youtube/download", async (req, res) => {
 
   const safeTitle = title.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 80) || "download";
   console.log("[api/youtube/download] stream requested", { videoId, itag });
+  let stage = "initializing";
 
   try {
+    stage = "creating-client";
     const youtube = await getYoutubeClient();
+    stage = "resolving-stream";
     const format = await youtube.getStreamingData(videoId, {
       client: selection.client,
       itag,
@@ -147,6 +150,7 @@ app.get("/api/youtube/download", async (req, res) => {
     if (!format.url) {
       throw new Error("YouTube did not provide a downloadable URL for this format");
     }
+    stage = "fetching-media";
     const upstream = await fetch(format.url, {
       headers: req.headers.range ? { Range: req.headers.range } : undefined,
     });
@@ -167,9 +171,14 @@ app.get("/api/youtube/download", async (req, res) => {
 
     Readable.fromWeb(upstream.body as any).pipe(res);
   } catch (error) {
-    console.error("[api/youtube/download] stream failed", { videoId, itag, error });
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("[api/youtube/download] stream failed", { videoId, itag, stage, error });
     if (!res.headersSent) {
-      return res.status(502).json({ error: "Could not retrieve this media stream. Please try again." });
+      return res.status(502).json({
+        error: "Could not retrieve this media stream. Please try again.",
+        code: `YOUTUBE_${stage.toUpperCase().replace(/-/g, "_")}_FAILED`,
+        detail,
+      });
     }
     res.end();
   }
