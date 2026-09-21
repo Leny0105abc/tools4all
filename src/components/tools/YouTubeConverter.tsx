@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Sparkles,
   Film,
+  MonitorDown,
 } from "lucide-react";
 
 interface VideoFormat {
@@ -39,6 +40,7 @@ export default function YouTubeConverter() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
+  const [showLocalFallback, setShowLocalFallback] = useState(false);
 
   const sampleLinks = [
     { label: "Tutorial Sample", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" },
@@ -61,12 +63,13 @@ export default function YouTubeConverter() {
         body: JSON.stringify({ url: targetUrl }),
       });
       if (!res.ok) {
-        throw new Error("Could not fetch video information. Check link format.");
+        throw new Error("Could not fetch video information from the hosting server.");
       }
       const data = await res.json();
       setVideoInfo(data);
     } catch (err: any) {
-      setError(err.message || "Failed to retrieve video stream info.");
+      setShowLocalFallback(true);
+      setError(`${err.message || "Failed to retrieve video stream info."} Use the Windows companion below.`);
     } finally {
       setLoading(false);
     }
@@ -115,9 +118,11 @@ export default function YouTubeConverter() {
       setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 
       setDownloadProgress(100);
+      setShowLocalFallback(false);
       setDownloadSuccess(`Saved ${format.format} (${format.quality}) to your device.`);
     } catch (err: any) {
-      setError(err.message || "Failed to download the media file.");
+      setShowLocalFallback(true);
+      setError(`${err.message || "Failed to download the media file."} Use the Windows companion below.`);
     } finally {
       setDownloadingId(null);
     }
@@ -214,6 +219,28 @@ export default function YouTubeConverter() {
           <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 flex items-center gap-2.5 text-xs text-emerald-700 dark:text-emerald-300">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
             <span>{downloadSuccess}</span>
+          </div>
+        )}
+
+        {showLocalFallback && (
+          <div className="p-4 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/70 text-indigo-600 dark:text-indigo-300 self-start">
+              <MonitorDown className="w-5 h-5" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-neutral-900 dark:text-white">Use the Windows companion</p>
+              <p className="text-xs text-neutral-600 dark:text-neutral-300 mt-1">
+                It downloads through your own internet connection when the hosting server is blocked. Extract the ZIP, then open the included Start file.
+              </p>
+            </div>
+            <a
+              href="/downloads/tools4all-local-downloader-windows.zip"
+              download
+              className="min-h-[42px] px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold inline-flex items-center justify-center gap-2 shrink-0 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Download for Windows
+            </a>
           </div>
         )}
       </div>
