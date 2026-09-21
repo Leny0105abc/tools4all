@@ -2,11 +2,17 @@ import express from "express";
 import path from "path";
 import { Readable } from "stream";
 import { GoogleGenAI } from "@google/genai";
+import { BotGuardClient } from "bgutils-js/botguard";
+import { buildURL, getHeaders, parseLooseJSON, USER_AGENT } from "bgutils-js/utils";
+import { WebPoMinter } from "bgutils-js/webpo";
+import type { WebPoSignalOutput } from "bgutils-js/shared-types";
+import { JSDOM } from "jsdom";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 let youtubeClientPromise: Promise<import("youtubei.js").Innertube> | null = null;
+let webPoMinterPromise: Promise<{ minter: WebPoMinter; expiresAt: number }> | null = null;
 
 function getYoutubeClient() {
   if (!youtubeClientPromise) {
@@ -19,6 +25,100 @@ function getYoutubeClient() {
     });
   }
   return youtubeClientPromise;
+}
+
+async function getWebPoMinter() {
+  if (!webPoMinterPromise) {
+    webPoMinterPromise = (async () => {
+      const dom = new JSDOM("<!DOCTYPE html><html lang=\"en\"><head></head><body></body></html>", {
+        url: "https://www.youtube.com",
+        referrer: "https://www.youtube.com/",
+      });
+      const pageResponse = await fetch("https://www.youtube.com", {
+        headers: {
+          accept: "*/*",
+          "accept-language": "en-US,en;q=0.7",
+          "user-agent": USER_AGENT,
+        },
+      });
+      if (!pageResponse.ok) {
+        throw new Error(`YouTube attestation page failed with status ${pageResponse.status}`);
+      }
+
+      const pageHtml = await pageResponse.text();
+      const ytConfig = pageHtml.match(/ytcfg\.set\(({.+?})\);/s)?.[1];
+      const initialAttestationData = pageHtml.match(/window\.ytAtN\(\s*({[\s\S]*?})\s*\)/)?.[1];
+      if (!ytConfig || !initialAttestationData) {
+        throw new Error("YouTube attestation data was not available");
+      }
+
+      (dom.window as any).yt = { config_: JSON.parse(ytConfig) };
+      Object.assign(globalThis, {
+        yt: (dom.window as any).yt,
+        window: dom.window,
+        document: dom.window.document,
+        location: dom.window.location,
+        origin: dom.window.origin,
+      });
+      if (!("navigator" in globalThis)) {
+        Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator });
+      }
+
+      const challengeResponse = (parseLooseJSON(initialAttestationData) as any).R;
+      if (!challengeResponse?.bgChallenge) {
+        throw new Error("YouTube BotGuard challenge was not available");
+      }
+
+      const interpreterUrl = challengeResponse.bgChallenge.interpreterUrl
+        .privateDoNotAccessOrElseTrustedResourceUrlWrappedValue;
+      const interpreterResponse = await fetch(`https:${interpreterUrl}`);
+      if (!interpreterResponse.ok) {
+        throw new Error(`YouTube BotGuard interpreter failed with status ${interpreterResponse.status}`);
+      }
+      const interpreterJavascript = await interpreterResponse.text();
+      new Function(interpreterJavascript)();
+
+      const botGuardClient = await BotGuardClient.create({
+        program: challengeResponse.bgChallenge.program,
+        globalName: challengeResponse.bgChallenge.globalName,
+        globalObject: globalThis,
+      });
+      const webPoSignalOutput: WebPoSignalOutput = [];
+      const botguardResponse = await botGuardClient.snapshot({ webPoSignalOutput });
+      const requestKey = "O43z0dpjhgX20SCx4KAo";
+      const integrityResponse = await fetch(buildURL("GenerateIT", true), {
+        method: "POST",
+        headers: getHeaders(),
+        body: JSON.stringify([requestKey, botguardResponse]),
+      });
+      if (!integrityResponse.ok) {
+        throw new Error(`YouTube integrity token failed with status ${integrityResponse.status}`);
+      }
+      const [integrityToken, estimatedTtlSecs, mintRefreshThreshold, websafeFallbackToken] =
+        await integrityResponse.json() as [string, number, number, string];
+      const minter = await WebPoMinter.create({
+        integrityToken,
+        estimatedTtlSecs,
+        mintRefreshThreshold,
+        websafeFallbackToken,
+      }, webPoSignalOutput);
+
+      return {
+        minter,
+        expiresAt: Date.now() + Math.max(60, estimatedTtlSecs - 60) * 1000,
+      };
+    })().catch((error) => {
+      webPoMinterPromise = null;
+      throw error;
+    });
+  }
+
+  const result = await webPoMinterPromise;
+  if (result.expiresAt <= Date.now()) {
+    webPoMinterPromise = null;
+    return getWebPoMinter();
+  }
+  return result.minter;
 }
 
 function extractYouTubeVideoId(input: string): string | null {
@@ -153,6 +253,24 @@ app.get("/api/youtube/download", async (req, res) => {
         if (format.url) break;
       } catch (error) {
         resolutionErrors.push(`${client}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (!format?.url) {
+      try {
+        stage = "creating-proof-token";
+        const minter = await getWebPoMinter();
+        const poToken = await minter.mintAsWebsafeString(videoId);
+        stage = "resolving-protected-stream";
+        for (const client of clients) {
+          try {
+            format = await youtube.getStreamingData(videoId, { client, itag, po_token: poToken });
+            if (format.url) break;
+          } catch (error) {
+            resolutionErrors.push(`${client}+PO: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      } catch (error) {
+        resolutionErrors.push(`BotGuard: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     if (!format?.url) {
