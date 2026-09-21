@@ -64,6 +64,7 @@ export default function CollageCreatorTool() {
   const [cornerRadius, setCornerRadius] = useState(16);
   const [bgColor, setBgColor] = useState("#0F172A");
   const [caption, setCaption] = useState("Photo Story Collection");
+  const [dragActive, setDragActive] = useState(false);
 
   const [collagePreviewUrl, setCollagePreviewUrl] = useState<string | null>(null);
   const collagePreviewUrlRef = useRef<string | null>(null);
@@ -198,19 +199,16 @@ export default function CollageCreatorTool() {
             Images to Collage Creation Studio
           </h1>
         </div>
-        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-          Combine multiple photos into customizable grid layouts, aspect ratios, rounded frames, and export high-res files to local disk.
+        <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-2">
+          Upload photos, choose a design, and save your collage as a JPG.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-start">
         {/* Left Controls & Image Queue (5 cols) */}
-        <div className="lg:col-span-5 space-y-4">
+        <div className="contents lg:block lg:col-span-5 lg:space-y-4">
           {/* Upload Zone */}
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="p-5 rounded-2xl border-2 border-dashed border-neutral-300 dark:border-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-700 bg-white dark:bg-neutral-900 text-center cursor-pointer transition-all"
-          >
+          <div className="order-1">
             <input
               ref={fileInputRef}
               type="file"
@@ -219,24 +217,40 @@ export default function CollageCreatorTool() {
               className="hidden"
               onChange={(e) => {
                 if (e.target.files?.length) handleFiles(e.target.files);
+                e.target.value = "";
               }}
             />
-            <div className="flex flex-col items-center justify-center space-y-1.5">
-              <Upload className="w-5 h-5 text-rose-500" />
-              <p className="text-xs font-semibold text-neutral-900 dark:text-white">
-                Upload 2 to 9 photos
-              </p>
-              <p className="text-[11px] text-neutral-400">
-                Click or drag & drop (JPG, PNG, WebP)
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragLeave={() => setDragActive(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragActive(false);
+                if (event.dataTransfer.files.length) handleFiles(event.dataTransfer.files);
+              }}
+              className={`w-full min-h-32 p-5 rounded-2xl border-2 border-dashed bg-white dark:bg-neutral-900 text-center transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500 ${
+                dragActive ? "border-rose-500 bg-rose-50 dark:bg-rose-950/40" : "border-neutral-300 dark:border-neutral-700 hover:border-rose-400"
+              }`}
+            >
+              <span className="flex flex-col items-center justify-center gap-1.5">
+                <Upload className="w-6 h-6 text-rose-500" />
+                <span className="text-sm font-semibold text-neutral-900 dark:text-white">Add photos (2–9)</span>
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">Tap to choose, or drag images here</span>
+              </span>
+            </button>
           </div>
 
           {/* Quick Demo Button */}
           {images.length === 0 && (
             <button
+              type="button"
               onClick={loadDemoImages}
-              className="w-full py-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center justify-center gap-1.5"
+              className="order-2 w-full min-h-11 px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 text-rose-700 dark:text-rose-300 text-sm font-semibold flex items-center justify-center gap-1.5"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Load 4 Sample Photos for Collage</span>
@@ -245,14 +259,14 @@ export default function CollageCreatorTool() {
 
           {/* Thumbnails list */}
           {images.length > 0 && (
-            <div className="p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-2">
-              <div className="flex items-center justify-between text-xs font-semibold text-neutral-700 dark:text-neutral-300">
+            <div className="order-3 p-3 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-2">
+              <div className="flex items-center justify-between text-sm font-semibold text-neutral-700 dark:text-neutral-300">
                 <span>Selected Photos ({images.length}/9)</span>
                 <button
                   onClick={() => {
                     setImages([]);
                   }}
-                  className="text-neutral-400 hover:text-red-500 text-[11px]"
+                  className="min-h-9 px-2 text-neutral-500 hover:text-red-500 text-sm"
                 >
                   Remove All
                 </button>
@@ -263,10 +277,12 @@ export default function CollageCreatorTool() {
                   <div key={idx} className="relative aspect-square rounded-lg overflow-hidden group bg-neutral-100">
                     <img src={url} alt="" className="w-full h-full object-cover" />
                     <button
+                      type="button"
                       onClick={() => removeImage(idx)}
-                      className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                      aria-label={`Remove photo ${idx + 1}`}
+                      className="absolute top-1 right-1 min-w-7 min-h-7 p-1 rounded-full bg-black/75 text-white flex items-center justify-center sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                     >
-                      <Trash2 className="w-3 h-3" />
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 ))}
@@ -274,13 +290,7 @@ export default function CollageCreatorTool() {
             </div>
           )}
 
-          {/* Customization Sliders & Layout */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-4">
-            <span className="text-xs font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
-              <Sliders className="w-3.5 h-3.5 text-neutral-400" />
-              <span>Collage Styling & Frame</span>
-            </span>
-
+          <div className="order-4 p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs">
             {/* Visual design picker */}
             <fieldset>
               <legend className="block text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
@@ -293,7 +303,7 @@ export default function CollageCreatorTool() {
                     type="button"
                     aria-pressed={layout === design.id}
                     onClick={() => setLayout(design.id)}
-                    className={`p-2 rounded-xl border-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500 ${
+                    className={`min-h-32 p-2 rounded-xl border-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500 ${
                       layout === design.id
                         ? "border-rose-500 bg-rose-50 dark:bg-rose-950/40"
                         : "border-neutral-200 dark:border-neutral-700 hover:border-rose-300 bg-neutral-50 dark:bg-neutral-800"
@@ -302,24 +312,33 @@ export default function CollageCreatorTool() {
                     <div className="h-16 rounded-lg bg-neutral-100 dark:bg-neutral-900 overflow-hidden mb-2">
                       <DesignThumbnail design={design.id} />
                     </div>
-                    <span className="block text-xs font-semibold text-neutral-900 dark:text-white">{design.label}</span>
-                    <span className="block text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">{design.description}</span>
+                    <span className="block text-sm font-semibold text-neutral-900 dark:text-white">{design.label}</span>
+                    <span className="block text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{design.description}</span>
                   </button>
                 ))}
               </div>
             </fieldset>
+          </div>
+
+          <div className="order-6 p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-4">
+            <h2 className="text-sm font-bold text-neutral-900 dark:text-white flex items-center gap-1.5">
+              <Sliders className="w-4 h-4 text-neutral-400" />
+              Fine-tune your collage
+            </h2>
 
             {/* Aspect Ratio */}
             <div>
-              <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
+              <span className="block text-sm font-semibold text-neutral-600 dark:text-neutral-400 mb-2">
                 Aspect Ratio
-              </label>
+              </span>
               <div className="flex gap-1.5">
                 {(["1:1", "4:5", "16:9", "9:16"] as const).map((ratio) => (
                   <button
                     key={ratio}
+                    type="button"
+                    aria-pressed={aspectRatio === ratio}
                     onClick={() => setAspectRatio(ratio)}
-                    className={`flex-1 py-1 rounded-lg text-xs font-mono font-medium transition-colors ${
+                    className={`flex-1 min-h-11 rounded-lg text-sm font-mono font-medium transition-colors ${
                       aspectRatio === ratio
                         ? "bg-neutral-900 dark:bg-white text-white dark:text-neutral-900"
                         : "bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400"
@@ -334,49 +353,54 @@ export default function CollageCreatorTool() {
             {/* Gap & Rounded Corners */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className="flex justify-between text-[11px] text-neutral-500 mb-1">
-                  <span>Spacing</span>
+                <div className="flex justify-between text-sm text-neutral-500 mb-2">
+                  <label htmlFor="collage-spacing">Spacing</label>
                   <span className="font-mono">{gap}px</span>
                 </div>
                 <input
+                  id="collage-spacing"
                   type="range"
                   min={0}
                   max={60}
                   value={gap}
                   onChange={(e) => setGap(Number(e.target.value))}
-                  className="w-full accent-rose-600"
+                  className="w-full h-8 accent-rose-600"
                 />
               </div>
 
               <div>
-                <div className="flex justify-between text-[11px] text-neutral-500 mb-1">
-                  <span>Corner Radius</span>
+                <div className="flex justify-between text-sm text-neutral-500 mb-2">
+                  <label htmlFor="collage-corners">Corner Radius</label>
                   <span className="font-mono">{cornerRadius}px</span>
                 </div>
                 <input
+                  id="collage-corners"
                   type="range"
                   min={0}
                   max={40}
                   value={cornerRadius}
                   onChange={(e) => setCornerRadius(Number(e.target.value))}
-                  className="w-full accent-rose-600"
+                  className="w-full h-8 accent-rose-600"
                 />
               </div>
             </div>
 
             {/* Background Color */}
             <div>
-              <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
+              <span className="block text-sm font-semibold text-neutral-600 dark:text-neutral-400 mb-2">
                 Background Canvas Color
-              </label>
+              </span>
               <div className="flex items-center gap-2">
                 {colorPresets.map((c, i) => (
                   <button
                     key={i}
+                    type="button"
+                    aria-label={c.label}
+                    aria-pressed={bgColor === c.val}
                     onClick={() => setBgColor(c.val)}
                     style={{ backgroundColor: c.val }}
-                    className={`w-6 h-6 rounded-full border-2 transition-transform ${
-                      bgColor === c.val ? "scale-110 border-rose-500" : "border-neutral-300 dark:border-neutral-700"
+                    className={`w-11 h-11 rounded-full border-2 transition-transform ${
+                      bgColor === c.val ? "ring-2 ring-offset-2 ring-rose-500 border-rose-500 dark:ring-offset-neutral-900" : "border-neutral-300 dark:border-neutral-700"
                     }`}
                     title={c.label}
                   />
@@ -386,35 +410,45 @@ export default function CollageCreatorTool() {
 
             {/* Caption */}
             <div>
-              <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
+              <label htmlFor="collage-caption" className="block text-sm font-semibold text-neutral-600 dark:text-neutral-400 mb-2">
                 Caption / Watermark
               </label>
               <input
+                id="collage-caption"
                 type="text"
                 value={caption}
                 onChange={(e) => setCaption(e.target.value)}
                 placeholder="Optional caption..."
-                className="w-full px-3 py-2 text-base sm:text-xs rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white"
+                className="w-full min-h-11 px-3 py-2 text-base rounded-xl bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 text-neutral-900 dark:text-white"
               />
             </div>
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={images.length < 2 || exporting}
+              className="lg:hidden w-full min-h-12 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              {exporting ? "Creating collage…" : "Save collage as JPG"}
+            </button>
           </div>
         </div>
 
         {/* Right Preview Canvas (7 cols) */}
-        <div className="lg:col-span-7 space-y-4">
+        <div className="order-5 lg:col-span-7 space-y-4 min-w-0">
           <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs flex flex-col items-center">
             <div className="w-full flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-neutral-200 dark:border-neutral-800 mb-4">
-              <span className="text-xs font-bold text-neutral-900 dark:text-white">
-                Live Rendered Canvas
+              <span className="text-sm font-bold text-neutral-900 dark:text-white">
+                Live preview
               </span>
               <button
                 id="btn-export-collage"
                 onClick={handleExport}
                 disabled={images.length < 2 || exporting}
-                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm sm:text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm shadow-rose-600/20 disabled:opacity-50 transition-all active:scale-98"
+                className="w-full sm:w-auto min-h-11 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold flex items-center justify-center gap-1.5 shadow-sm shadow-rose-600/20 disabled:opacity-50 transition-all active:scale-98"
               >
                 <Download className="w-4 h-4" />
-                <span>Export Collage (JPG)</span>
+                <span>{exporting ? "Creating collage…" : "Save collage as JPG"}</span>
               </button>
             </div>
 
@@ -429,7 +463,7 @@ export default function CollageCreatorTool() {
             ) : (
               <div className="w-full aspect-square max-w-md flex flex-col items-center justify-center p-8 rounded-xl bg-neutral-50 dark:bg-neutral-800/40 border border-dashed border-neutral-200 dark:border-neutral-800 text-center text-neutral-400">
                 <ImageIcon className="w-12 h-12 mb-2 text-neutral-300 dark:text-neutral-600" />
-                <p className="text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                <p className="text-sm font-medium text-neutral-600 dark:text-neutral-400">
                   Upload at least 2 photos to preview your collage
                 </p>
                 <p className="text-[11px] text-neutral-400 mt-1">
