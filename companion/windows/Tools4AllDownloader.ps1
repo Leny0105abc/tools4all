@@ -100,15 +100,11 @@ $form.Controls.Add($logBox)
 
 function Add-LogLine([string]$line) {
     if ([string]::IsNullOrWhiteSpace($line)) { return }
-    if ($form.IsHandleCreated) {
-        $form.BeginInvoke([Action]{
-            $logBox.AppendText($line + [Environment]::NewLine)
-            if ($line -match '(\d{1,3}(?:\.\d+)?)%') {
-                $percent = [Math]::Min(100, [Math]::Max(0, [int][double]$matches[1]))
-                $progressBar.Value = $percent
-                $statusLabel.Text = "Downloading... $percent%"
-            }
-        }) | Out-Null
+    $logBox.AppendText($line + [Environment]::NewLine)
+    if ($line -match '(\d{1,3}(?:\.\d+)?)%') {
+        $percent = [Math]::Min(100, [Math]::Max(0, [int][double]$matches[1]))
+        $progressBar.Value = $percent
+        $statusLabel.Text = "Downloading... $percent%"
     }
 }
 
@@ -167,31 +163,56 @@ $downloadButton.Add_Click({
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
 
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $startInfo
-    $process.EnableRaisingEvents = $true
-    $process.add_OutputDataReceived({ param($sender, $event) Add-LogLine $event.Data })
-    $process.add_ErrorDataReceived({ param($sender, $event) Add-LogLine $event.Data })
-    $process.add_Exited({
-        $exitCode = $process.ExitCode
-        $form.BeginInvoke([Action]{
-            $downloadButton.Enabled = $true
-            $browseButton.Enabled = $true
-            $urlBox.Enabled = $true
-            if ($exitCode -eq 0) {
-                $progressBar.Value = 100
-                $statusLabel.Text = "Download complete"
-                [System.Windows.Forms.MessageBox]::Show("The MP4 was saved successfully.", "Download complete", "OK", "Information") | Out-Null
-            } else {
-                $statusLabel.Text = "Download failed - review the details below"
-            }
-        }) | Out-Null
-    })
-
     try {
-        $process.Start() | Out-Null
-        $process.BeginOutputReadLine()
-        $process.BeginErrorReadLine()
+        $script:downloadProcess = New-Object System.Diagnostics.Process
+        $script:downloadProcess.StartInfo = $startInfo
+        $script:downloadProcess.Start() | Out-Null
+        $script:stdoutTask = $script:downloadProcess.StandardOutput.ReadLineAsync()
+        $script:stderrTask = $script:downloadProcess.StandardError.ReadLineAsync()
+
+        $script:downloadTimer = New-Object System.Windows.Forms.Timer
+        $script:downloadTimer.Interval = 200
+        $script:downloadTimer.Add_Tick({
+            foreach ($stream in @("stdout", "stderr")) {
+                for ($index = 0; $index -lt 20; $index++) {
+                    $task = if ($stream -eq "stdout") { $script:stdoutTask } else { $script:stderrTask }
+                    if ($null -eq $task -or -not $task.IsCompleted) { break }
+                    try {
+                        $line = $task.Result
+                    } catch {
+                        Add-LogLine $_.Exception.Message
+                        $line = $null
+                    }
+                    if ($null -eq $line) {
+                        if ($stream -eq "stdout") { $script:stdoutTask = $null } else { $script:stderrTask = $null }
+                        break
+                    }
+                    Add-LogLine $line
+                    if ($stream -eq "stdout") {
+                        $script:stdoutTask = $script:downloadProcess.StandardOutput.ReadLineAsync()
+                    } else {
+                        $script:stderrTask = $script:downloadProcess.StandardError.ReadLineAsync()
+                    }
+                }
+            }
+
+            if ($script:downloadProcess.HasExited -and $null -eq $script:stdoutTask -and $null -eq $script:stderrTask) {
+                $script:downloadTimer.Stop()
+                $script:downloadTimer.Dispose()
+                $downloadButton.Enabled = $true
+                $browseButton.Enabled = $true
+                $urlBox.Enabled = $true
+                if ($script:downloadProcess.ExitCode -eq 0) {
+                    $progressBar.Value = 100
+                    $statusLabel.Text = "Download complete"
+                    [System.Windows.Forms.MessageBox]::Show("The MP4 was saved successfully.", "Download complete", "OK", "Information") | Out-Null
+                } else {
+                    $statusLabel.Text = "Download failed - review the details below"
+                }
+                $script:downloadProcess.Dispose()
+            }
+        })
+        $script:downloadTimer.Start()
     } catch {
         $downloadButton.Enabled = $true
         $browseButton.Enabled = $true
