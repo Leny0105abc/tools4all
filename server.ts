@@ -259,12 +259,33 @@ app.get("/api/youtube/download", async (req, res) => {
       try {
         stage = "creating-proof-token";
         const minter = await getWebPoMinter();
-        const poToken = await minter.mintAsWebsafeString(videoId);
+        const { Innertube, UniversalCache } = await import("youtubei.js");
+        const bootstrapClient = await Innertube.create({
+          retrieve_player: false,
+          generate_session_locally: true,
+        });
+        const visitorData = bootstrapClient.session.context.client.visitorData;
+        if (!visitorData) {
+          throw new Error("YouTube visitor session was not available");
+        }
+        const sessionPoToken = await minter.mintAsWebsafeString(visitorData);
+        const contentPoToken = await minter.mintAsWebsafeString(videoId);
+        const protectedYoutube = await Innertube.create({
+          po_token: sessionPoToken,
+          visitor_data: visitorData,
+          cache: new UniversalCache(false),
+          generate_session_locally: true,
+        });
         stage = "resolving-protected-stream";
         for (const client of clients) {
           try {
-            format = await youtube.getStreamingData(videoId, { client, itag, po_token: poToken });
-            if (format.url) break;
+            format = await protectedYoutube.getStreamingData(videoId, { client, itag });
+            if (format.url) {
+              const protectedUrl = new URL(format.url);
+              protectedUrl.searchParams.set("pot", contentPoToken);
+              format.url = protectedUrl.toString();
+              break;
+            }
           } catch (error) {
             resolutionErrors.push(`${client}+PO: ${error instanceof Error ? error.message : String(error)}`);
           }
