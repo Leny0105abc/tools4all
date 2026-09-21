@@ -14,6 +14,46 @@ import {
 import { generateCollageBlob, CollageConfig } from "../../utils/imageCompressor";
 import { downloadBlob } from "../../utils/audioConverter";
 
+const designOptions: { id: CollageConfig["layout"]; label: string; description: string }[] = [
+  { id: "grid-2x2", label: "Balanced Grid", description: "Two equal columns" },
+  { id: "grid-3x3", label: "Gallery Grid", description: "Three equal columns" },
+  { id: "featured-left", label: "Spotlight", description: "One large feature photo" },
+  { id: "side-by-side", label: "Photo Strips", description: "Full-height columns" },
+  { id: "polaroid-row", label: "Polaroid", description: "Printed-photo frames" },
+];
+
+function DesignThumbnail({ design }: { design: CollageConfig["layout"] }) {
+  const tile = "rounded-[3px] bg-gradient-to-br from-rose-300 to-orange-200 dark:from-rose-700 dark:to-orange-500";
+
+  if (design === "polaroid-row") {
+    return (
+      <div className="flex items-center justify-center gap-1.5 h-full px-2" aria-hidden="true">
+        {[-7, 4, -4].map((angle) => (
+          <div key={angle} className="w-1/4 h-3/4 bg-white p-1 pb-2 shadow-sm" style={{ transform: `rotate(${angle}deg)` }}>
+            <div className={`${tile} w-full h-full`} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const classes = {
+    "grid-2x2": "grid-cols-2 grid-rows-2",
+    "grid-3x3": "grid-cols-3 grid-rows-3",
+    "featured-left": "grid-cols-3 grid-rows-2",
+    "side-by-side": "grid-cols-3 grid-rows-1",
+  }[design];
+  const count = design === "grid-3x3" ? 9 : design === "featured-left" || design === "side-by-side" ? 3 : 4;
+
+  return (
+    <div className={`grid ${classes} gap-1 h-full p-2`} aria-hidden="true">
+      {Array.from({ length: count }, (_, index) => (
+        <div key={index} className={`${tile} ${design === "featured-left" && index === 0 ? "col-span-2 row-span-2" : ""}`} />
+      ))}
+    </div>
+  );
+}
+
 export default function CollageCreatorTool() {
   const [images, setImages] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
@@ -26,6 +66,7 @@ export default function CollageCreatorTool() {
   const [caption, setCaption] = useState("Photo Story Collection");
 
   const [collagePreviewUrl, setCollagePreviewUrl] = useState<string | null>(null);
+  const collagePreviewUrlRef = useRef<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -37,18 +78,24 @@ export default function CollageCreatorTool() {
     }
     const combined = [...images, ...valid].slice(0, 9);
     setImages(combined);
-    setPreviewUrls(combined.map((f) => URL.createObjectURL(f)));
   };
 
   const removeImage = (index: number) => {
     const updated = images.filter((_, i) => i !== index);
     setImages(updated);
-    setPreviewUrls(updated.map((f) => URL.createObjectURL(f)));
   };
+
+  useEffect(() => {
+    const urls = images.map((file) => URL.createObjectURL(file));
+    setPreviewUrls(urls);
+    return () => urls.forEach((url) => URL.revokeObjectURL(url));
+  }, [images]);
 
   // Render collage preview whenever images or config changes
   useEffect(() => {
     if (images.length < 2) {
+      if (collagePreviewUrlRef.current) URL.revokeObjectURL(collagePreviewUrlRef.current);
+      collagePreviewUrlRef.current = null;
       setCollagePreviewUrl(null);
       return;
     }
@@ -67,6 +114,8 @@ export default function CollageCreatorTool() {
         });
         if (isMounted) {
           const url = URL.createObjectURL(blob);
+          if (collagePreviewUrlRef.current) URL.revokeObjectURL(collagePreviewUrlRef.current);
+          collagePreviewUrlRef.current = url;
           setCollagePreviewUrl(url);
         }
       } catch (err) {
@@ -80,6 +129,10 @@ export default function CollageCreatorTool() {
       clearTimeout(timer);
     };
   }, [images, layout, aspectRatio, gap, padding, cornerRadius, bgColor, caption]);
+
+  useEffect(() => () => {
+    if (collagePreviewUrlRef.current) URL.revokeObjectURL(collagePreviewUrlRef.current);
+  }, []);
 
   const handleExport = async () => {
     if (images.length < 2) return;
@@ -198,7 +251,6 @@ export default function CollageCreatorTool() {
                 <button
                   onClick={() => {
                     setImages([]);
-                    setPreviewUrls([]);
                   }}
                   className="text-neutral-400 hover:text-red-500 text-[11px]"
                 >
@@ -229,32 +281,33 @@ export default function CollageCreatorTool() {
               <span>Collage Styling & Frame</span>
             </span>
 
-            {/* Layout Options */}
-            <div>
-              <label className="block text-[11px] font-semibold text-neutral-600 dark:text-neutral-400 mb-1.5">
-                Layout Arrangement
-              </label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {[
-                  { id: "grid-2x2", label: "2x2 Quad Grid" },
-                  { id: "grid-3x3", label: "3x3 Masonry" },
-                  { id: "featured-left", label: "1 Hero + 2 Side" },
-                  { id: "side-by-side", label: "Side-by-Side" },
-                ].map((l) => (
+            {/* Visual design picker */}
+            <fieldset>
+              <legend className="block text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
+                Choose a design
+              </legend>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-2">
+                {designOptions.map((design) => (
                   <button
-                    key={l.id}
-                    onClick={() => setLayout(l.id as any)}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-medium text-left transition-colors ${
-                      layout === l.id
-                        ? "bg-rose-600 text-white"
-                        : "bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200"
+                    key={design.id}
+                    type="button"
+                    aria-pressed={layout === design.id}
+                    onClick={() => setLayout(design.id)}
+                    className={`p-2 rounded-xl border-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500 ${
+                      layout === design.id
+                        ? "border-rose-500 bg-rose-50 dark:bg-rose-950/40"
+                        : "border-neutral-200 dark:border-neutral-700 hover:border-rose-300 bg-neutral-50 dark:bg-neutral-800"
                     }`}
                   >
-                    {l.label}
+                    <div className="h-16 rounded-lg bg-neutral-100 dark:bg-neutral-900 overflow-hidden mb-2">
+                      <DesignThumbnail design={design.id} />
+                    </div>
+                    <span className="block text-xs font-semibold text-neutral-900 dark:text-white">{design.label}</span>
+                    <span className="block text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">{design.description}</span>
                   </button>
                 ))}
               </div>
-            </div>
+            </fieldset>
 
             {/* Aspect Ratio */}
             <div>
@@ -361,7 +414,7 @@ export default function CollageCreatorTool() {
                 className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm sm:text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm shadow-rose-600/20 disabled:opacity-50 transition-all active:scale-98"
               >
                 <Download className="w-4 h-4" />
-                <span>Export Collage (PNG/JPG)</span>
+                <span>Export Collage (JPG)</span>
               </button>
             </div>
 

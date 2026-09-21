@@ -103,9 +103,16 @@ export async function generateCollageBlob(
     imageFiles.map((f) => {
       return new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = () => reject(new Error(`Failed to load ${f.name}`));
-        img.src = URL.createObjectURL(f);
+        const sourceUrl = URL.createObjectURL(f);
+        img.onload = () => {
+          URL.revokeObjectURL(sourceUrl);
+          resolve(img);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(sourceUrl);
+          reject(new Error(`Failed to load ${f.name}`));
+        };
+        img.src = sourceUrl;
       });
     })
   );
@@ -147,36 +154,49 @@ export async function generateCollageBlob(
     h: number;
   }
   const slots: Slot[] = [];
-
-  if (config.layout === "side-by-side" || images.length === 2) {
-    const slotW = (availW - gap) / 2;
-    slots.push({ x: pad, y: pad, w: slotW, h: availH });
-    slots.push({ x: pad + slotW + gap, y: pad, w: slotW, h: availH });
-  } else if (config.layout === "grid-2x2" || images.length <= 4) {
-    const slotW = (availW - gap) / 2;
-    const slotH = (availH - gap) / 2;
-    slots.push({ x: pad, y: pad, w: slotW, h: slotH });
-    slots.push({ x: pad + slotW + gap, y: pad, w: slotW, h: slotH });
-    slots.push({ x: pad, y: pad + slotH + gap, w: slotW, h: slotH });
-    slots.push({ x: pad + slotW + gap, y: pad + slotH + gap, w: slotW, h: slotH });
-  } else if (config.layout === "featured-left") {
-    const leftW = (availW - gap) * 0.6;
-    const rightW = (availW - gap) * 0.4;
-    const rightH = (availH - gap) / 2;
-    slots.push({ x: pad, y: pad, w: leftW, h: availH });
-    slots.push({ x: pad + leftW + gap, y: pad, w: rightW, h: rightH });
-    slots.push({ x: pad + leftW + gap, y: pad + rightH + gap, w: rightW, h: rightH });
-  } else {
-    // grid-3x3 default
-    const cols = 3;
-    const rows = Math.ceil(Math.min(images.length, 9) / cols);
-    const slotW = (availW - gap * (cols - 1)) / cols;
+  const imageCount = Math.min(images.length, 9);
+  const addGridSlots = (columns: number, fillLastRow = true) => {
+    const rows = Math.ceil(imageCount / columns);
     const slotH = (availH - gap * (rows - 1)) / rows;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
+    for (let row = 0; row < rows; row++) {
+      const itemsInRow = Math.min(columns, imageCount - row * columns);
+      const slotW = fillLastRow
+        ? (availW - gap * (itemsInRow - 1)) / itemsInRow
+        : (availW - gap * (columns - 1)) / columns;
+      const rowWidth = itemsInRow * slotW + gap * (itemsInRow - 1);
+      const startX = pad + (availW - rowWidth) / 2;
+      for (let column = 0; column < itemsInRow; column++) {
         slots.push({
-          x: pad + c * (slotW + gap),
-          y: pad + r * (slotH + gap),
+          x: startX + column * (slotW + gap),
+          y: pad + row * (slotH + gap),
+          w: slotW,
+          h: slotH,
+        });
+      }
+    }
+  };
+
+  if (config.layout === "side-by-side") {
+    addGridSlots(imageCount);
+  } else if (config.layout === "grid-2x2") {
+    addGridSlots(2);
+  } else if (config.layout === "grid-3x3" || config.layout === "polaroid-row") {
+    addGridSlots(3, config.layout !== "polaroid-row");
+  } else if (config.layout === "featured-left") {
+    const heroW = (availW - gap) * 0.55;
+    const rightW = availW - gap - heroW;
+    slots.push({ x: pad, y: pad, w: heroW, h: availH });
+    const remaining = imageCount - 1;
+    const columns = remaining > 4 ? 2 : 1;
+    const rows = Math.ceil(remaining / columns);
+    const slotH = (availH - gap * (rows - 1)) / rows;
+    for (let row = 0; row < rows; row++) {
+      const itemsInRow = Math.min(columns, remaining - row * columns);
+      const slotW = (rightW - gap * (itemsInRow - 1)) / itemsInRow;
+      for (let column = 0; column < itemsInRow; column++) {
+        slots.push({
+          x: pad + heroW + gap + column * (slotW + gap),
+          y: pad + row * (slotH + gap),
           w: slotW,
           h: slotH,
         });
@@ -190,29 +210,35 @@ export async function generateCollageBlob(
     const slot = slots[i];
 
     ctx.save();
-    if (config.cornerRadius > 0) {
-      roundRect(ctx, slot.x, slot.y, slot.w, slot.h, config.cornerRadius);
-      ctx.clip();
-    }
-
-    // Cover fit
-    const imgRatio = img.width / img.height;
-    const slotRatio = slot.w / slot.h;
-    let drawW, drawH, drawX, drawY;
-
-    if (imgRatio > slotRatio) {
-      drawH = slot.h;
-      drawW = slot.h * imgRatio;
-      drawX = slot.x - (drawW - slot.w) / 2;
-      drawY = slot.y;
+    if (config.layout === "polaroid-row") {
+      const inset = Math.min(slot.w, slot.h) * 0.06;
+      const cardW = slot.w - inset * 2;
+      const cardH = slot.h - inset * 2;
+      ctx.translate(slot.x + slot.w / 2, slot.y + slot.h / 2);
+      ctx.rotate(([-4, 3, -2][i % 3] * Math.PI) / 180);
+      ctx.shadowColor = "rgba(0, 0, 0, 0.25)";
+      ctx.shadowBlur = 18;
+      ctx.shadowOffsetY = 8;
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(-cardW / 2, -cardH / 2, cardW, cardH);
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      const border = Math.min(cardW, cardH) * 0.06;
+      const photoSlot = {
+        x: -cardW / 2 + border,
+        y: -cardH / 2 + border,
+        w: cardW - border * 2,
+        h: cardH - border * 3,
+      };
+      drawCoverImage(ctx, img, photoSlot);
     } else {
-      drawW = slot.w;
-      drawH = slot.w / imgRatio;
-      drawX = slot.x;
-      drawY = slot.y - (drawH - slot.h) / 2;
+      if (config.cornerRadius > 0) {
+        roundRect(ctx, slot.x, slot.y, slot.w, slot.h, config.cornerRadius);
+        ctx.clip();
+      }
+      drawCoverImage(ctx, img, slot);
     }
-
-    ctx.drawImage(img, drawX, drawY, drawW, drawH);
     ctx.restore();
   }
 
@@ -232,6 +258,29 @@ export async function generateCollageBlob(
       resolve(b);
     }, "image/jpeg", 0.95);
   });
+}
+
+function drawCoverImage(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  slot: { x: number; y: number; w: number; h: number }
+) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(slot.x, slot.y, slot.w, slot.h);
+  ctx.clip();
+  const imageRatio = img.width / img.height;
+  const slotRatio = slot.w / slot.h;
+  const drawW = imageRatio > slotRatio ? slot.h * imageRatio : slot.w;
+  const drawH = imageRatio > slotRatio ? slot.h : slot.w / imageRatio;
+  ctx.drawImage(
+    img,
+    slot.x - (drawW - slot.w) / 2,
+    slot.y - (drawH - slot.h) / 2,
+    drawW,
+    drawH
+  );
+  ctx.restore();
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
