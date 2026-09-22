@@ -5,6 +5,7 @@ import Dashboard from "./components/dashboard/Dashboard";
 import CloudStorageSuite from "./components/dashboard/CloudStorageSuite";
 import YouTubeConverter from "./components/tools/YouTubeConverter";
 import Mp4ToMp3Converter from "./components/tools/Mp4ToMp3Converter";
+import AudioNotesTool from "./components/tools/AudioNotesTool";
 import NameAndTextConverter from "./components/tools/NameAndTextConverter";
 import ExcelPasswordUnlocker from "./components/tools/ExcelPasswordUnlocker";
 import DocumentConverter from "./components/tools/DocumentConverter";
@@ -18,6 +19,7 @@ import { ShieldCheck, Sparkles, Smartphone, Layers } from "lucide-react";
 export default function App() {
   const [currentTool, setCurrentTool] = useState<ToolId>("dashboard");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [audioNoteActive, setAudioNoteActive] = useState(false);
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("omni_theme");
@@ -39,14 +41,24 @@ export default function App() {
 
   const toggleTheme = () => setIsDark((prev) => !prev);
 
+  const selectTool = (tool: ToolId) => {
+    if (currentTool === "audio-notes" && audioNoteActive && tool !== "audio-notes") {
+      window.alert("Stop or cancel your recording before switching tools, so it is not lost.");
+      return;
+    }
+    setCurrentTool(tool);
+  };
+
   const renderActiveTool = () => {
     switch (currentTool) {
       case "dashboard":
-        return <Dashboard onSelectTool={setCurrentTool} />;
+        return <Dashboard onSelectTool={selectTool} />;
       case "youtube-converter":
         return <YouTubeConverter />;
       case "mp4-to-mp3":
         return <Mp4ToMp3Converter />;
+      case "audio-notes":
+        return <AudioNotesTool onActiveChange={setAudioNoteActive} />;
       case "name-text-converter":
         return <NameAndTextConverter />;
       case "excel-unlocker":
@@ -62,9 +74,9 @@ export default function App() {
       case "ocr-paperwork":
         return <OcrPaperworkTool />;
       case "cloud-storage":
-        return <CloudStorageSuite onNavigateToTool={setCurrentTool} />;
+        return <CloudStorageSuite onNavigateToTool={selectTool} />;
       default:
-        return <Dashboard onSelectTool={setCurrentTool} />;
+        return <Dashboard onSelectTool={selectTool} />;
     }
   };
 
@@ -79,6 +91,7 @@ export default function App() {
     { id: "dashboard", label: "Overview" },
     { id: "youtube-converter", label: "YouTube DL" },
     { id: "mp4-to-mp3", label: "MP4 to MP3" },
+    { id: "audio-notes", label: "Audio Notes" },
     { id: "name-text-converter", label: "Name & Text" },
     { id: "excel-unlocker", label: "Excel Unlock" },
     { id: "document-converter", label: "PDF & Docs" },
@@ -94,7 +107,7 @@ export default function App() {
       {/* Top Navigation */}
       <Navbar
         currentTool={currentTool}
-        onSelectTool={setCurrentTool}
+        onSelectTool={selectTool}
         isDark={isDark}
         onToggleTheme={toggleTheme}
         mobileMenuOpen={mobileMenuOpen}
@@ -106,7 +119,7 @@ export default function App() {
         {allToolPills.map((pill) => (
           <button
             key={pill.id}
-            onClick={() => setCurrentTool(pill.id)}
+            onClick={() => selectTool(pill.id)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
               currentTool === pill.id
                 ? "bg-indigo-600 text-white shadow-xs font-semibold"
@@ -122,7 +135,7 @@ export default function App() {
         {/* Persistent Collapsible Sidebar */}
         <Sidebar
           currentTool={currentTool}
-          onSelectTool={setCurrentTool}
+          onSelectTool={selectTool}
           mobileOpen={mobileMenuOpen}
           onCloseMobile={() => setMobileMenuOpen(false)}
         />
@@ -173,7 +186,7 @@ export default function App() {
         className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-around px-2 py-1.5 safe-bottom shadow-lg"
       >
         <button
-          onClick={() => setCurrentTool("dashboard")}
+          onClick={() => selectTool("dashboard")}
           className={`flex flex-col items-center justify-center min-w-[56px] py-1 px-1 rounded-xl transition-colors ${
             currentTool === "dashboard"
               ? "text-indigo-600 dark:text-indigo-400 font-semibold"
@@ -185,7 +198,7 @@ export default function App() {
         </button>
 
         <button
-          onClick={() => setCurrentTool("youtube-converter")}
+          onClick={() => selectTool("youtube-converter")}
           className={`flex flex-col items-center justify-center min-w-[56px] py-1 px-1 rounded-xl transition-colors ${
             currentTool === "youtube-converter" || currentTool === "mp4-to-mp3"
               ? "text-indigo-600 dark:text-indigo-400 font-semibold"
@@ -197,7 +210,7 @@ export default function App() {
         </button>
 
         <button
-          onClick={() => setCurrentTool("ocr-paperwork")}
+          onClick={() => selectTool("ocr-paperwork")}
           className={`flex flex-col items-center justify-center min-w-[56px] py-1 px-1 rounded-xl transition-colors ${
             currentTool === "ocr-paperwork"
               ? "text-teal-600 dark:text-teal-400 font-semibold"
@@ -209,7 +222,7 @@ export default function App() {
         </button>
 
         <button
-          onClick={() => setCurrentTool("excel-unlocker")}
+          onClick={() => selectTool("excel-unlocker")}
           className={`flex flex-col items-center justify-center min-w-[56px] py-1 px-1 rounded-xl transition-colors ${
             currentTool === "excel-unlocker"
               ? "text-emerald-600 dark:text-emerald-400 font-semibold"

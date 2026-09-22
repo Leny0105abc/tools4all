@@ -13,10 +13,12 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --sourcemap --outfile=server.js",
     "start": "node server.js",
     "preview": "vite preview",
+    "test:audio-notes": "node --import tsx --test tests/audioNotesMp3.test.mjs tests/audioNotesStorage.test.ts tests/audioNotesTool.test.tsx",
     "clean": "rm -rf dist server.js server.js.map",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
@@ -42,6 +44,7 @@
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.28.0",
+    "fake-indexeddb": "^6.2.5",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2"

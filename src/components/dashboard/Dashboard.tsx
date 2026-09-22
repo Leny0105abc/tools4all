@@ -1,6 +1,7 @@
 import {
   Youtube,
   Music,
+  Mic,
   ArrowLeftRight,
   FileSpreadsheet,
   FileText,
@@ -49,6 +50,15 @@ export default function Dashboard({ onSelectTool }: DashboardProps) {
       badge: "Audio Extractor",
       color: "from-violet-500/10 to-violet-500/5 text-violet-600 dark:text-violet-400 border-violet-200 dark:border-violet-900/50",
       actionLabel: "Extract Audio",
+    },
+    {
+      id: "audio-notes",
+      title: "Audio Notes",
+      description: "Record voice notes, review them, and keep or download real MP3 files on this device.",
+      icon: Mic,
+      badge: "Voice Recorder",
+      color: "from-violet-500/10 to-indigo-500/5 text-violet-600 dark:text-violet-400 border-violet-200 dark:border-violet-900/50",
+      actionLabel: "Quick Record",
     },
     {
       id: "name-text-converter",
@@ -149,7 +159,7 @@ export default function Dashboard({ onSelectTool }: DashboardProps) {
               <div className="text-[11px] text-neutral-400">Local & Client-Side Privacy</div>
             </div>
             <div className="p-3 rounded-2xl bg-white/5 backdrop-blur-xs border border-white/10">
-              <div className="text-base sm:text-lg font-black text-emerald-400">10 Tools</div>
+              <div className="text-base sm:text-lg font-black text-emerald-400">11 Tools</div>
               <div className="text-[11px] text-neutral-400">Multi-Format Suite</div>
             </div>
             <div className="p-3 rounded-2xl bg-white/5 backdrop-blur-xs border border-white/10">
@@ -180,8 +190,16 @@ export default function Dashboard({ onSelectTool }: DashboardProps) {
             return (
               <div
                 key={tool.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelectTool(tool.id)}
-                className={`p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group`}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectTool(tool.id);
+                  }
+                }}
+                className={`p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700 shadow-xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500`}
               >
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
