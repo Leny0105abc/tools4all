@@ -7,6 +7,7 @@ import { buildURL, getHeaders, parseLooseJSON, USER_AGENT } from "bgutils-js/uti
 import { WebPoMinter } from "bgutils-js/webpo";
 import type { WebPoSignalOutput } from "bgutils-js/shared-types";
 import { JSDOM } from "jsdom";
+import { isLikelyMp3, MAX_SUMMARY_AUDIO_BYTES, summarizeAudioNote } from "./src/server/audioNoteSummary";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -221,6 +222,30 @@ app.post("/api/youtube/info", async (req, res) => {
     res.status(500).json({ error: error.message || "Failed to process YouTube link" });
   }
 });
+
+// Audio is sent only when the user explicitly requests a summary. It is not
+// persisted on this server; the resulting text is saved by the browser.
+app.post(
+  "/api/gemini/audio-summary",
+  express.raw({ type: "audio/mpeg", limit: MAX_SUMMARY_AUDIO_BYTES }),
+  async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    if (!Buffer.isBuffer(req.body) || !isLikelyMp3(req.body)) {
+      return res.status(400).json({ error: "Please provide a valid MP3 audio note." });
+    }
+    const ai = getGeminiClient();
+    if (!ai) {
+      return res.status(503).json({ error: "AI summaries are not configured yet. The site owner needs to add a Gemini API key." });
+    }
+    try {
+      const summary = await summarizeAudioNote(ai, req.body);
+      return res.json({ summary });
+    } catch (error) {
+      console.error("Audio note summary failed:", error);
+      return res.status(502).json({ error: "The audio note could not be summarized right now. Please try again later." });
+    }
+  },
+);
 
 // Stream original YouTube media bytes without transcoding.
 app.get("/api/youtube/download", async (req, res) => {

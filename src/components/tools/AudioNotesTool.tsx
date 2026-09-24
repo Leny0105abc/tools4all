@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Mic, Pause, Play, RotateCcw, Save, Search, Square, Trash2, Pencil, X, AlertCircle } from "lucide-react";
+import { Download, Mic, Pause, Play, RotateCcw, Save, Search, Square, Trash2, Pencil, X, AlertCircle, Sparkles } from "lucide-react";
 import { downloadBlob, formatFileSize } from "../../utils/audioConverter";
 import { convertRecordingToMp3, safeAudioNoteFilename } from "../../utils/audioNotesMp3";
 import {
@@ -15,6 +15,7 @@ import {
 
 type RecorderStatus = "ready" | "recording" | "paused" | "processing" | "ready-to-save" | "saved";
 type NoteSort = "newest" | "oldest" | "title" | "longest" | "shortest";
+const MAX_SUMMARY_AUDIO_BYTES = 45 * 1024 * 1024;
 
 function formatDuration(milliseconds: number): string {
   const totalSeconds = Math.floor(milliseconds / 1000);
@@ -88,6 +89,8 @@ export default function AudioNotesTool({ onActiveChange }: { onActiveChange: (ac
   const [warning, setWarning] = useState("");
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [summarizingId, setSummarizingId] = useState<string | null>(null);
+  const [summaryAvailable, setSummaryAvailable] = useState<boolean | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -114,6 +117,17 @@ export default function AudioNotesTool({ onActiveChange }: { onActiveChange: (ac
       }
     }).catch(() => setError("Local storage is unavailable. Check your browser settings before recording."));
     return () => { mountedRef.current = false; microphoneRequestRef.current++; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/health")
+      .then((response) => response.json())
+      .then((health: { hasGeminiKey?: boolean }) => {
+        if (!cancelled && typeof health.hasGeminiKey === "boolean") setSummaryAvailable(health.hasGeminiKey);
+      })
+      .catch(() => { /* The summary request will report any connection error. */ });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -334,6 +348,33 @@ export default function AudioNotesTool({ onActiveChange }: { onActiveChange: (ac
     } catch { setError("Changes could not be saved. Please try again."); }
   };
 
+  const summarizeNote = async (note: AudioNote) => {
+    if (summaryAvailable === false || summarizingId) return;
+    if (note.mp3Blob.size > MAX_SUMMARY_AUDIO_BYTES) {
+      setError("This recording is too large to summarize online (45 MB maximum). You can still play or download it.");
+      return;
+    }
+    if (!window.confirm(`Send "${note.title}" to Google Gemini to create a written summary? The recording will leave this device for processing.`)) return;
+    setSummarizingId(note.id);
+    setError("");
+    try {
+      const response = await fetch("/api/gemini/audio-summary", {
+        method: "POST",
+        headers: { "Content-Type": "audio/mpeg" },
+        body: note.mp3Blob,
+      });
+      const result: { summary?: unknown; error?: string } = await response.json().catch(() => ({}));
+      if (response.status === 413) throw new Error("This recording is too large to summarize online (45 MB maximum).");
+      if (!response.ok) throw new Error(result.error || "The summary service could not be reached. Please try again.");
+      if (typeof result.summary !== "string" || !result.summary.trim()) throw new Error("The summary service returned no usable summary.");
+      const updated = { ...note, summary: result.summary.trim() };
+      await saveAudioNote(updated);
+      setNotes((previous) => previous.map((item) => item.id === note.id ? updated : item));
+    } catch (summaryError) {
+      setError(summaryError instanceof Error ? summaryError.message : "The summary could not be created. Please try again.");
+    } finally { setSummarizingId(null); }
+  };
+
   const removeNote = async (note: AudioNote) => {
     if (!window.confirm(`Delete "${note.title}"? This cannot be undone.`)) return;
     try {
@@ -345,7 +386,7 @@ export default function AudioNotesTool({ onActiveChange }: { onActiveChange: (ac
 
   const filteredNotes = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
-    const matching = notes.filter((note) => [note.title, note.description, note.category, ...note.tags].some((value) => value.toLocaleLowerCase().includes(query)));
+    const matching = notes.filter((note) => [note.title, note.description, note.category, note.summary || "", ...note.tags].some((value) => value.toLocaleLowerCase().includes(query)));
     return matching.sort((a, b) => {
       switch (sort) {
         case "oldest": return a.createdAt - b.createdAt;
@@ -385,7 +426,7 @@ export default function AudioNotesTool({ onActiveChange }: { onActiveChange: (ac
           {active && <button type="button" onClick={stopRecording} className="min-h-11 px-5 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"><Square className="w-4 h-4" /> Stop Recording</button>}
           {active && <button type="button" onClick={cancelRecording} className={secondaryButton}><X className="w-4 h-4" /> Cancel Recording</button>}
         </div>
-        <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400">Your audio notes are stored locally on this device unless you choose to download or export them.</p>
+        <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400">Recordings and saved summaries stay on this device. A recording is sent to Google Gemini only if you choose to summarize it.</p>
       </section>
 
       {draft && <section aria-labelledby="audio-draft-heading" className="p-4 sm:p-6 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-4">
@@ -399,9 +440,38 @@ export default function AudioNotesTool({ onActiveChange }: { onActiveChange: (ac
           <label className="relative"><Search className="absolute left-3 top-3.5 w-4 h-4 text-neutral-400" /><span className="sr-only">Search audio notes</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search audio notes..." className={`${fieldClass} pl-10`} /></label>
           <label className="flex items-center gap-2 text-sm font-semibold"><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as NoteSort)} className={fieldClass}><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="title">A–Z</option><option value="longest">Longest recording</option><option value="shortest">Shortest recording</option></select></label>
         </div>
-        {filteredNotes.length === 0 ? <div className="p-8 rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-700 text-center text-sm text-neutral-500 dark:text-neutral-400">{notes.length ? "No audio notes match your search." : "No saved notes yet. Use Quick Record to make your first one."}</div> : <div className="grid grid-cols-1 gap-3">{filteredNotes.map((note) => <article key={note.id} className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
-          {editingId === note.id ? <><NoteFields values={editFields} onChange={setEditFields} prefix={`edit-${note.id}`} /><div className="flex flex-wrap gap-2"><button type="button" onClick={() => saveEdit(note)} className="min-h-11 px-4 rounded-xl bg-indigo-600 text-white text-sm font-semibold">Save changes</button><button type="button" onClick={() => setEditingId(null)} className={secondaryButton}>Cancel</button></div></> : <><div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2"><div className="min-w-0"><h3 className="text-base font-bold break-words">{note.title}</h3><p className="text-sm text-neutral-500 dark:text-neutral-400">{noteDate(note.createdAt)} · {formatDuration(note.durationMs)} · {formatFileSize(note.size)}</p>{note.description && <p className="text-sm mt-2 whitespace-pre-wrap break-words">{note.description}</p>}</div>{note.category && <span className="self-start px-2 py-1 rounded-lg bg-violet-50 dark:bg-violet-950 text-violet-700 dark:text-violet-300 text-xs font-semibold">{note.category}</span>}</div>{note.tags.length > 0 && <div className="flex flex-wrap gap-1.5">{note.tags.map((tag, index) => <span key={`${tag}-${index}`} className="px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-xs text-neutral-600 dark:text-neutral-300">#{tag}</span>)}</div>}<div className="flex flex-wrap gap-2"><button type="button" onClick={() => setPlayingId(playingId === note.id ? null : note.id)} className={secondaryButton}><Play className="w-4 h-4" /> {playingId === note.id ? "Close player" : "Play"}</button><button type="button" onClick={() => downloadBlob(note.mp3Blob, safeAudioNoteFilename(note.title, note.createdAt))} className={secondaryButton}><Download className="w-4 h-4" /> Download MP3</button><button type="button" onClick={() => { setEditingId(note.id); setEditFields({ title: note.title, description: note.description, category: note.category, tags: note.tags.join(", ") }); }} className={secondaryButton}><Pencil className="w-4 h-4" /> Edit</button><button type="button" onClick={() => removeNote(note)} className={`${secondaryButton} text-red-700 dark:text-red-400`}><Trash2 className="w-4 h-4" /> Delete</button></div>{playingId === note.id && <audio controls autoPlay preload="metadata" src={playingUrl ?? undefined} aria-label={`Play ${note.title}`} className="w-full" />}</>}
-        </article>)}</div>}
+        {summaryAvailable === false && <p role="status" className="text-sm text-amber-800 dark:text-amber-200">AI summaries are not available yet. The site owner needs to configure a Gemini API key.</p>}
+        {filteredNotes.length === 0 ? (
+          <div className="p-8 rounded-2xl border border-dashed border-neutral-300 dark:border-neutral-700 text-center text-sm text-neutral-500 dark:text-neutral-400">{notes.length ? "No audio notes match your search." : "No saved notes yet. Use Quick Record to make your first one."}</div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3">
+            {filteredNotes.map((note) => (
+              <article key={note.id} className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-3">
+                {editingId === note.id ? (
+                  <><NoteFields values={editFields} onChange={setEditFields} prefix={`edit-${note.id}`} /><div className="flex flex-wrap gap-2"><button type="button" onClick={() => saveEdit(note)} className="min-h-11 px-4 rounded-xl bg-indigo-600 text-white text-sm font-semibold">Save changes</button><button type="button" onClick={() => setEditingId(null)} className={secondaryButton}>Cancel</button></div></>
+                ) : (
+                  <>
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                      <div className="min-w-0"><h3 className="text-base font-bold break-words">{note.title}</h3><p className="text-sm text-neutral-500 dark:text-neutral-400">{noteDate(note.createdAt)} · {formatDuration(note.durationMs)} · {formatFileSize(note.size)}</p>{note.description && <p className="text-sm mt-2 whitespace-pre-wrap break-words">{note.description}</p>}</div>
+                      {note.category && <span className="self-start px-2 py-1 rounded-lg bg-violet-50 dark:bg-violet-950 text-violet-700 dark:text-violet-300 text-xs font-semibold">{note.category}</span>}
+                    </div>
+                    {note.tags.length > 0 && <div className="flex flex-wrap gap-1.5">{note.tags.map((tag, index) => <span key={`${tag}-${index}`} className="px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-xs text-neutral-600 dark:text-neutral-300">#{tag}</span>)}</div>}
+                    {note.summary && <section aria-label={`Summary of ${note.title}`} className="rounded-xl border border-violet-200 dark:border-violet-900 bg-violet-50 dark:bg-violet-950/30 p-4"><h4 className="font-semibold text-violet-800 dark:text-violet-200 mb-2">Written summary</h4><p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{note.summary}</p><p className="text-xs text-neutral-600 dark:text-neutral-400 mt-3">AI-generated—check important details against the recording.</p></section>}
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setPlayingId(playingId === note.id ? null : note.id)} className={secondaryButton}><Play className="w-4 h-4" /> {playingId === note.id ? "Close player" : "Play"}</button>
+                      <button type="button" onClick={() => summarizeNote(note)} disabled={summaryAvailable === false || summarizingId !== null} className={`${secondaryButton} disabled:opacity-50 disabled:cursor-not-allowed`}><Sparkles className="w-4 h-4" /> {summarizingId === note.id ? "Summarizing..." : note.summary ? "Regenerate summary" : "Summarize"}</button>
+                      <button type="button" onClick={() => downloadBlob(note.mp3Blob, safeAudioNoteFilename(note.title, note.createdAt))} className={secondaryButton}><Download className="w-4 h-4" /> Download MP3</button>
+                      <button type="button" onClick={() => { setEditingId(note.id); setEditFields({ title: note.title, description: note.description, category: note.category, tags: note.tags.join(", ") }); }} className={secondaryButton}><Pencil className="w-4 h-4" /> Edit</button>
+                      <button type="button" onClick={() => removeNote(note)} className={`${secondaryButton} text-red-700 dark:text-red-400`}><Trash2 className="w-4 h-4" /> Delete</button>
+                    </div>
+                    {summarizingId === note.id && <p role="status" aria-live="polite" className="text-sm text-neutral-600 dark:text-neutral-300">Listening to your recording and preparing a summary...</p>}
+                    {playingId === note.id && <audio controls autoPlay preload="metadata" src={playingUrl ?? undefined} aria-label={`Play ${note.title}`} className="w-full" />}
+                  </>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

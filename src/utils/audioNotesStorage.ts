@@ -9,6 +9,7 @@ export interface AudioNote {
   size: number;
   mp3Blob: Blob;
   transcript?: string;
+  summary?: string;
 }
 
 export interface AudioNoteDraft {

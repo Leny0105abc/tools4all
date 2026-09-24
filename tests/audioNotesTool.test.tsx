@@ -19,6 +19,16 @@ test("record, pause, resume, stop, save, reopen, search, edit, download, and del
   Object.defineProperty(dom.window.navigator, "mediaDevices", { value: { getUserMedia: async () => { microphoneCalls++; if (microphoneFailure) throw microphoneFailure; return { getTracks: () => [track], getAudioTracks: () => [track] }; } } });
   Object.defineProperty(dom.window.navigator, "storage", { value: { estimate: async () => ({ quota: 100_000_000, usage: 0 }) } });
   dom.window.confirm = () => true;
+  const originalFetch = globalThis.fetch;
+  const summaryUploads: Blob[] = [];
+  globalThis.fetch = async (input, init) => {
+    if (input === "/api/health") return Response.json({ status: "ok", hasGeminiKey: true });
+    if (input === "/api/gemini/audio-summary") {
+      summaryUploads.push(init?.body as Blob);
+      return Response.json({ summary: "The lecture covered nail, skin, and hair structure." });
+    }
+    throw new Error(`Unexpected request: ${String(input)}`);
+  };
   const downloads: string[] = [];
   dom.window.HTMLAnchorElement.prototype.click = function () { downloads.push(this.download); };
   Object.assign(URL, { createObjectURL: () => "blob:test", revokeObjectURL: () => {} });
@@ -136,6 +146,18 @@ test("record, pause, resume, stop, save, reopen, search, edit, download, and del
     await click("Save changes");
     await fill('input[placeholder="Search audio notes..."]', "");
     assert.ok(container.textContent?.includes("Renamed Lecture"));
+    await click("Summarize");
+    await waitFor(() => !!container.textContent?.includes("The lecture covered nail, skin, and hair structure."));
+    assert.equal(summaryUploads.length, 1, "audio is sent only after choosing Summarize");
+    assert.equal(summaryUploads[0].type, "audio/mpeg");
+    assert.equal((await listAudioNotes()).find((note) => note.title === "Renamed Lecture")?.summary, "The lecture covered nail, skin, and hair structure.");
+    await act(async () => { root.unmount(); });
+    root = createRoot(container);
+    await act(async () => { root.render(React.createElement(AudioNotesTool, { onActiveChange: () => {} })); });
+    await waitFor(() => !!container.textContent?.includes("The lecture covered nail, skin, and hair structure."));
+    await fill('input[placeholder="Search audio notes..."]', "nail");
+    assert.deepEqual(noteOrder(), ["Renamed Lecture"], "saved summaries are searchable");
+    await fill('input[placeholder="Search audio notes..."]', "");
     await click("Download MP3");
     assert.match(downloads[0], /^Renamed-Lecture-\d{4}-\d{2}-\d{2}\.mp3$/);
     await click("Delete");
@@ -161,6 +183,7 @@ test("record, pause, resume, stop, save, reopen, search, edit, download, and del
     assert.equal(await getAudioNoteDraft(), undefined);
   } finally {
     await act(async () => { root.unmount(); });
+    globalThis.fetch = originalFetch;
     dom.window.close();
   }
 });
