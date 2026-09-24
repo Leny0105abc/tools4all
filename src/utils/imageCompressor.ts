@@ -91,6 +91,8 @@ export interface CollageConfig {
   gap: number;
   padding: number;
   cornerRadius: number;
+  borderWidth: number;
+  borderColor: string;
   bgColor: string;
   caption?: string;
 }
@@ -232,6 +234,7 @@ export async function generateCollageBlob(
         h: cardH - border * 3,
       };
       drawCoverImage(ctx, img, photoSlot);
+      drawSlotBorder(ctx, photoSlot, 0, config.borderWidth, config.borderColor);
     } else {
       if (config.cornerRadius > 0) {
         roundRect(ctx, slot.x, slot.y, slot.w, slot.h, config.cornerRadius);
@@ -240,6 +243,9 @@ export async function generateCollageBlob(
       drawCoverImage(ctx, img, slot);
     }
     ctx.restore();
+    if (config.layout !== "polaroid-row") {
+      drawSlotBorder(ctx, slot, config.cornerRadius, config.borderWidth, config.borderColor);
+    }
   }
 
   // Optional Caption text
@@ -280,6 +286,32 @@ function drawCoverImage(
     drawW,
     drawH
   );
+  ctx.restore();
+}
+
+function drawSlotBorder(
+  ctx: CanvasRenderingContext2D,
+  slot: { x: number; y: number; w: number; h: number },
+  radius: number,
+  requestedWidth: number,
+  color: string,
+) {
+  const width = Math.max(0, Math.min(requestedWidth, Math.min(slot.w, slot.h) / 4));
+  if (width === 0) return;
+
+  const inset = width / 2;
+  ctx.save();
+  ctx.lineWidth = width;
+  ctx.strokeStyle = color;
+  roundRect(
+    ctx,
+    slot.x + inset,
+    slot.y + inset,
+    slot.w - width,
+    slot.h - width,
+    Math.max(0, radius - inset),
+  );
+  ctx.stroke();
   ctx.restore();
 }
 

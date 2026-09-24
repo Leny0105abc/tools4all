@@ -62,6 +62,8 @@ export default function CollageCreatorTool() {
   const [gap, setGap] = useState(24);
   const [padding, setPadding] = useState(32);
   const [cornerRadius, setCornerRadius] = useState(16);
+  const [borderWidth, setBorderWidth] = useState(0);
+  const [borderColor, setBorderColor] = useState("#FFFFFF");
   const [bgColor, setBgColor] = useState("#0F172A");
   const [caption, setCaption] = useState("Photo Story Collection");
   const [dragActive, setDragActive] = useState(false);
@@ -110,6 +112,8 @@ export default function CollageCreatorTool() {
           gap,
           padding,
           cornerRadius,
+          borderWidth,
+          borderColor,
           bgColor,
           caption: caption.trim() || undefined,
         });
@@ -129,7 +133,7 @@ export default function CollageCreatorTool() {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [images, layout, aspectRatio, gap, padding, cornerRadius, bgColor, caption]);
+  }, [images, layout, aspectRatio, gap, padding, cornerRadius, borderWidth, borderColor, bgColor, caption]);
 
   useEffect(() => () => {
     if (collagePreviewUrlRef.current) URL.revokeObjectURL(collagePreviewUrlRef.current);
@@ -145,6 +149,8 @@ export default function CollageCreatorTool() {
         gap,
         padding,
         cornerRadius,
+        borderWidth,
+        borderColor,
         bgColor,
         caption: caption.trim() || undefined,
       });
@@ -185,6 +191,15 @@ export default function CollageCreatorTool() {
     { label: "Warm Beige", val: "#F5F0EB" },
     { label: "Midnight Blue", val: "#1E1B4B" },
     { label: "Charcoal Black", val: "#18181B" },
+  ];
+
+  const borderColorPresets = [
+    { label: "White", val: "#FFFFFF" },
+    { label: "Black", val: "#111827" },
+    { label: "Gold", val: "#F59E0B" },
+    { label: "Rose", val: "#F43F5E" },
+    { label: "Blue", val: "#2563EB" },
+    { label: "Green", val: "#10B981" },
   ];
 
   return (
@@ -384,6 +399,67 @@ export default function CollageCreatorTool() {
                 />
               </div>
             </div>
+
+            {/* Photo Border */}
+            <fieldset className="space-y-3">
+              <legend className="text-sm font-semibold text-neutral-600 dark:text-neutral-400">
+                Photo Border
+              </legend>
+              <div>
+                <div className="flex justify-between text-sm text-neutral-500 mb-2">
+                  <label htmlFor="collage-border-width">Thickness</label>
+                  <span className="font-mono">{borderWidth}px</span>
+                </div>
+                <input
+                  id="collage-border-width"
+                  type="range"
+                  min={0}
+                  max={32}
+                  step={2}
+                  value={borderWidth}
+                  onChange={(e) => setBorderWidth(Number(e.target.value))}
+                  className="w-full h-8 accent-rose-600"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2" aria-label="Border color options">
+                {borderColorPresets.map((color) => (
+                  <button
+                    key={color.val}
+                    type="button"
+                    aria-label={`${color.label} border`}
+                    aria-pressed={borderColor.toUpperCase() === color.val}
+                    onClick={() => {
+                      setBorderColor(color.val);
+                      if (borderWidth === 0) setBorderWidth(8);
+                    }}
+                    style={{ backgroundColor: color.val }}
+                    className={`w-11 h-11 rounded-full border-2 transition-transform ${
+                      borderColor.toUpperCase() === color.val && borderWidth > 0
+                        ? "ring-2 ring-offset-2 ring-rose-500 border-rose-500 dark:ring-offset-neutral-900"
+                        : "border-neutral-300 dark:border-neutral-700"
+                    }`}
+                    title={color.label}
+                  />
+                ))}
+                <label className="relative w-11 h-11 rounded-full overflow-hidden border-2 border-neutral-300 dark:border-neutral-700 cursor-pointer" title="Custom border color">
+                  <span className="sr-only">Custom border color</span>
+                  <input
+                    type="color"
+                    aria-label="Custom border color"
+                    value={borderColor}
+                    onChange={(e) => {
+                      setBorderColor(e.target.value.toUpperCase());
+                      if (borderWidth === 0) setBorderWidth(8);
+                    }}
+                    className="absolute -inset-2 w-16 h-16 cursor-pointer"
+                  />
+                  <Palette className="absolute inset-0 m-auto w-4 h-4 text-white drop-shadow pointer-events-none" aria-hidden="true" />
+                </label>
+              </div>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                Choose a color to turn the border on automatically. Set thickness to 0 for no border.
+              </p>
+            </fieldset>
 
             {/* Background Color */}
             <div>
