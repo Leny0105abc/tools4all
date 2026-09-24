@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import type { GoogleGenAI } from "@google/genai";
-import { INLINE_AUDIO_LIMIT_BYTES, isLikelyMp3, summarizeAudioNote } from "../src/server/audioNoteSummary.ts";
+import { INLINE_AUDIO_LIMIT_BYTES, SUMMARY_MODELS, isLikelyMp3, summarizeAudioNote } from "../src/server/audioNoteSummary.ts";
 
 test("validates MP3 headers and summarizes small audio inline", async () => {
   const audio = Buffer.from([0xff, 0xfb, 0x90, 0x00, 1, 2, 3]);
@@ -46,6 +46,52 @@ test("does not invent a summary when the AI response is empty", async () => {
     models: { generateContent: async () => ({ text: '{"summary":""}' }) },
   } as unknown as GoogleGenAI;
   await assert.rejects(summarizeAudioNote(ai, Buffer.from([0xff, 0xfb, 0x90, 0x00])), /no usable summary/);
+});
+
+test("retries temporary Gemini failures and falls back to another audio-capable model", async () => {
+  const attemptedModels: string[] = [];
+  const waits: number[] = [];
+  const ai = {
+    files: { upload: async () => {}, delete: async () => {} },
+    models: {
+      generateContent: async ({ model }: { model: string }) => {
+        attemptedModels.push(model);
+        if (model === SUMMARY_MODELS[0]) {
+          throw Object.assign(new Error('{"error":{"code":503,"status":"UNAVAILABLE"}}'), { code: 503 });
+        }
+        return { text: '{"summary":"Recovered using the fallback model."}' };
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  const summary = await summarizeAudioNote(ai, Buffer.from([0xff, 0xfb, 0x90, 0x00]), {
+    attemptsPerModel: 2,
+    wait: async (milliseconds) => { waits.push(milliseconds); },
+  });
+
+  assert.equal(summary, "Recovered using the fallback model.");
+  assert.deepEqual(attemptedModels, [SUMMARY_MODELS[0], SUMMARY_MODELS[0], SUMMARY_MODELS[1]]);
+  assert.equal(waits.length, 1);
+  assert.ok(waits[0] >= 750);
+});
+
+test("does not retry permanent Gemini request errors", async () => {
+  let attempts = 0;
+  const ai = {
+    files: { upload: async () => {}, delete: async () => {} },
+    models: {
+      generateContent: async () => {
+        attempts += 1;
+        throw Object.assign(new Error("Invalid API key"), { code: 400 });
+      },
+    },
+  } as unknown as GoogleGenAI;
+
+  await assert.rejects(
+    summarizeAudioNote(ai, Buffer.from([0xff, 0xfb, 0x90, 0x00]), { wait: async () => {} }),
+    /Invalid API key/,
+  );
+  assert.equal(attempts, 1);
 });
 
 test("the summary API rejects invalid audio and reports missing configuration", async () => {
