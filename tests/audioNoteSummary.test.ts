@@ -97,21 +97,41 @@ test("does not retry permanent Gemini request errors", async () => {
 test("the summary API rejects invalid audio and reports missing configuration", async () => {
   const previousVercel = process.env.VERCEL;
   const previousKey = process.env.GEMINI_API_KEY;
+  const previousAuthUsername = process.env.AUTH_USERNAME;
+  const previousAuthPassword = process.env.AUTH_PASSWORD;
+  const previousAuthSecret = process.env.AUTH_SESSION_SECRET;
   process.env.VERCEL = "1";
   delete process.env.GEMINI_API_KEY;
+  process.env.AUTH_USERNAME = "test-user";
+  process.env.AUTH_PASSWORD = "test-password";
+  process.env.AUTH_SESSION_SECRET = "test-session-secret-that-is-long-enough-12345";
   const { default: app } = await import("../server.ts");
   const server = app.listen(0, "127.0.0.1");
   try {
     await once(server, "listening");
-    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/gemini/audio-summary`;
-    const invalid = await fetch(url, { method: "POST", headers: { "Content-Type": "audio/mpeg" }, body: Buffer.from("not mp3") });
+    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const protectedResponse = await fetch(`${baseUrl}/api/gemini/audio-summary`, { method: "POST" });
+    assert.equal(protectedResponse.status, 401);
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+      method: "POST",
+      redirect: "manual",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ username: "test-user", password: "test-password" }),
+    });
+    const cookie = login.headers.get("set-cookie")?.split(";", 1)[0];
+    assert.ok(cookie);
+    const url = `${baseUrl}/api/gemini/audio-summary`;
+    const invalid = await fetch(url, { method: "POST", headers: { "Content-Type": "audio/mpeg", Cookie: cookie }, body: Buffer.from("not mp3") });
     assert.equal(invalid.status, 400);
-    const unavailable = await fetch(url, { method: "POST", headers: { "Content-Type": "audio/mpeg" }, body: Buffer.from([0xff, 0xfb, 0x90, 0x00]) });
+    const unavailable = await fetch(url, { method: "POST", headers: { "Content-Type": "audio/mpeg", Cookie: cookie }, body: Buffer.from([0xff, 0xfb, 0x90, 0x00]) });
     assert.equal(unavailable.status, 503);
     assert.match((await unavailable.json() as { error: string }).error, /not configured/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (previousVercel === undefined) delete process.env.VERCEL; else process.env.VERCEL = previousVercel;
     if (previousKey === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = previousKey;
+    if (previousAuthUsername === undefined) delete process.env.AUTH_USERNAME; else process.env.AUTH_USERNAME = previousAuthUsername;
+    if (previousAuthPassword === undefined) delete process.env.AUTH_PASSWORD; else process.env.AUTH_PASSWORD = previousAuthPassword;
+    if (previousAuthSecret === undefined) delete process.env.AUTH_SESSION_SECRET; else process.env.AUTH_SESSION_SECRET = previousAuthSecret;
   }
 });

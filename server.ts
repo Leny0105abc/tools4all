@@ -8,8 +8,20 @@ import { WebPoMinter } from "bgutils-js/webpo";
 import type { WebPoSignalOutput } from "bgutils-js/shared-types";
 import { JSDOM } from "jsdom";
 import { isLikelyMp3, MAX_SUMMARY_AUDIO_BYTES, summarizeAudioNote } from "./src/server/audioNoteSummary";
+import {
+  AUTH_COOKIE_NAME,
+  createSessionToken,
+  getAuthConfig,
+  readCookie,
+  safeEqual,
+  sanitizeNextPath,
+  SESSION_TTL_SECONDS,
+  verifySessionToken,
+} from "./src/server/auth";
 
 const app = express();
+app.disable("x-powered-by");
+app.set("trust proxy", 1);
 const PORT = Number(process.env.PORT) || 3000;
 
 let youtubeClientPromise: Promise<import("youtubei.js").Innertube> | null = null;
@@ -143,6 +155,120 @@ function extractYouTubeVideoId(input: string): string | null {
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+type LoginAttempt = { count: number; resetAt: number };
+const loginAttempts = new Map<string, LoginAttempt>();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const MAX_LOGIN_ATTEMPTS = 5;
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function loginPage(options: { error?: string; nextPath?: string; unavailable?: boolean } = {}) {
+  const error = options.error
+    ? `<div class="error" role="alert">${escapeHtml(options.error)}</div>`
+    : "";
+  const nextPath = sanitizeNextPath(options.nextPath);
+  const disabled = options.unavailable ? "disabled" : "";
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Sign in · Tools4All</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#171717;background:#f5f7fb}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at top left,#e0e7ff 0,transparent 38%),radial-gradient(circle at bottom right,#ffe4e6 0,transparent 38%),#f8fafc}.card{width:min(100%,420px);background:rgba(255,255,255,.96);border:1px solid #e5e7eb;border-radius:24px;padding:32px;box-shadow:0 24px 70px rgba(15,23,42,.13)}.brand{display:flex;align-items:center;gap:12px;margin-bottom:28px}.logo{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;color:white;font-weight:800;background:linear-gradient(135deg,#4f46e5,#38bdf8);box-shadow:0 8px 24px rgba(79,70,229,.28)}h1{font-size:1.5rem;line-height:1.25;margin:0 0 6px}p{margin:0;color:#64748b;font-size:.95rem;line-height:1.55}.field{margin-top:18px}label{display:block;font-size:.9rem;font-weight:650;margin-bottom:7px}input{width:100%;min-height:48px;border:1px solid #d4d4d8;border-radius:12px;padding:11px 13px;font:inherit;background:white;color:#171717}input:focus{outline:3px solid rgba(99,102,241,.2);border-color:#6366f1}button{width:100%;min-height:50px;margin-top:22px;border:0;border-radius:12px;background:#4f46e5;color:white;font:inherit;font-weight:700;cursor:pointer}button:hover{background:#4338ca}button:disabled{opacity:.5;cursor:not-allowed}.error{margin-top:18px;padding:12px 14px;border:1px solid #fecaca;border-radius:12px;background:#fef2f2;color:#b91c1c;font-size:.9rem}.privacy{margin-top:18px;text-align:center;font-size:.78rem;color:#94a3b8}@media(max-width:480px){body{padding:14px}.card{padding:24px;border-radius:20px}}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand"><div class="logo">T4</div><div><strong>Tools4All</strong><p>Private workspace</p></div></div>
+    <h1>Welcome back</h1>
+    <p>Sign in to access the file and media tools.</p>
+    ${error}
+    <form method="post" action="/api/auth/login">
+      <input type="hidden" name="next" value="${escapeHtml(nextPath)}" />
+      <div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" required autofocus ${disabled} /></div>
+      <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required ${disabled} /></div>
+      <button type="submit" ${disabled}>Sign in</button>
+    </form>
+    <div class="privacy">Your session is protected with a secure, HTTP-only cookie.</div>
+  </main>
+</body>
+</html>`;
+}
+
+function hasValidSession(req: express.Request): boolean {
+  const config = getAuthConfig();
+  if (!config) return false;
+  return verifySessionToken(readCookie(req.headers.cookie, AUTH_COOKIE_NAME), config);
+}
+
+app.get("/login", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  if (hasValidSession(req)) return res.redirect(sanitizeNextPath(req.query.next));
+  const configured = Boolean(getAuthConfig());
+  return res.status(configured ? 200 : 503).type("html").send(loginPage({
+    nextPath: sanitizeNextPath(req.query.next),
+    unavailable: !configured,
+    error: configured ? undefined : "Login is temporarily unavailable. The site owner needs to finish authentication setup.",
+  }));
+});
+
+app.post("/api/auth/login", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const config = getAuthConfig();
+  if (!config) return res.status(503).type("html").send(loginPage({ unavailable: true, error: "Login is temporarily unavailable." }));
+
+  const attemptKey = req.ip || req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  const previous = loginAttempts.get(attemptKey);
+  const attempt = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + LOGIN_WINDOW_MS };
+  if (attempt.count >= MAX_LOGIN_ATTEMPTS) {
+    res.setHeader("Retry-After", String(Math.max(1, Math.ceil((attempt.resetAt - now) / 1000))));
+    return res.status(429).type("html").send(loginPage({
+      nextPath: sanitizeNextPath(req.body.next),
+      error: "Too many sign-in attempts. Please wait 15 minutes and try again.",
+    }));
+  }
+
+  const valid = safeEqual(String(req.body.username ?? ""), config.username)
+    && safeEqual(String(req.body.password ?? ""), config.password);
+  if (!valid) {
+    loginAttempts.set(attemptKey, { ...attempt, count: attempt.count + 1 });
+    return res.status(401).type("html").send(loginPage({
+      nextPath: sanitizeNextPath(req.body.next),
+      error: "The username or password is incorrect.",
+    }));
+  }
+
+  loginAttempts.delete(attemptKey);
+  const token = createSessionToken(config);
+  const secure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
+  const cookie = `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${SESSION_TTL_SECONDS}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
+  res.setHeader("Set-Cookie", cookie);
+  return res.redirect(303, sanitizeNextPath(req.body.next));
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  const secure = process.env.NODE_ENV === "production" || req.secure || req.headers["x-forwarded-proto"] === "https";
+  res.setHeader("Set-Cookie", `${AUTH_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`);
+  return res.redirect(303, "/login");
+});
+
+app.use((req, res, next) => {
+  if (req.path === "/api/health") return next();
+  if (hasValidSession(req)) return next();
+  if (req.path.startsWith("/api/")) return res.status(401).json({ error: "Authentication required." });
+  return res.redirect(`/login?next=${encodeURIComponent(sanitizeNextPath(req.originalUrl))}`);
+});
+
 // Lazy initialize Gemini AI client
 function getGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -164,6 +290,7 @@ app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
     hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+    hasAuthConfig: Boolean(getAuthConfig()),
     timestamp: new Date().toISOString(),
   });
 });

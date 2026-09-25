@@ -9,6 +9,7 @@ import {
   Layers,
   Sparkles,
   Command,
+  LogOut,
 } from "lucide-react";
 import { ToolId } from "../types";
 
@@ -177,6 +178,17 @@ export default function Navbar({
             <Sparkles className="w-3.5 h-3.5" />
             <span>Dashboard</span>
           </button>
+
+          <form action="/api/auth/logout" method="post">
+            <button
+              type="submit"
+              aria-label="Log out"
+              title="Log out"
+              className="p-2 rounded-xl text-neutral-600 dark:text-neutral-300 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 border border-neutral-200 dark:border-neutral-700/60 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </form>
         </div>
       </div>
 
