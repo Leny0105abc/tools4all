@@ -16,6 +16,7 @@ import {
   Zap,
   HardDrive,
   Upload,
+  Video,
 } from "lucide-react";
 import { ToolTabId } from "../../types";
 
@@ -50,6 +51,15 @@ export default function Dashboard({ onSelectTool }: DashboardProps) {
       badge: "Audio Extractor",
       color: "from-violet-500/10 to-violet-500/5 text-violet-600 dark:text-violet-400 border-violet-200 dark:border-violet-900/50",
       actionLabel: "Extract Audio",
+    },
+    {
+      id: "video-compressor",
+      title: "Video Compression Studio",
+      description: "Reduce video size locally with mobile-friendly quality presets, resolution controls, preview, and download.",
+      icon: Video,
+      badge: "Local Compressor",
+      color: "from-cyan-500/10 to-cyan-500/5 text-cyan-600 dark:text-cyan-400 border-cyan-200 dark:border-cyan-900/50",
+      actionLabel: "Compress Video",
     },
     {
       id: "audio-notes",
@@ -149,7 +159,7 @@ export default function Dashboard({ onSelectTool }: DashboardProps) {
           </h1>
 
           <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed">
-            Convert YouTube media, extract MP3 audio, unlock passworded Excel sheets, reformat names, compress images, split/merge PDFs, and scan paperwork via AI OCR on desktop and mobile.
+            Convert YouTube media, compress video, extract MP3 audio, unlock passworded Excel sheets, reformat names, compress images, split/merge PDFs, and scan paperwork via AI OCR on desktop and mobile.
           </p>
 
           {/* Metric quick stats */}
@@ -159,7 +169,7 @@ export default function Dashboard({ onSelectTool }: DashboardProps) {
               <div className="text-[11px] text-neutral-400">Local & Client-Side Privacy</div>
             </div>
             <div className="p-3 rounded-2xl bg-white/5 backdrop-blur-xs border border-white/10">
-              <div className="text-base sm:text-lg font-black text-emerald-400">11 Tools</div>
+              <div className="text-base sm:text-lg font-black text-emerald-400">12 Tools</div>
               <div className="text-[11px] text-neutral-400">Multi-Format Suite</div>
             </div>
             <div className="p-3 rounded-2xl bg-white/5 backdrop-blur-xs border border-white/10">

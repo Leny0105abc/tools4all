@@ -2,6 +2,7 @@ export type ToolId =
   | "dashboard"
   | "youtube-converter"
   | "mp4-to-mp3"
+  | "video-compressor"
   | "audio-notes"
   | "name-text-converter"
   | "excel-unlocker"

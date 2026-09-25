@@ -5,6 +5,7 @@ import Dashboard from "./components/dashboard/Dashboard";
 import CloudStorageSuite from "./components/dashboard/CloudStorageSuite";
 import YouTubeConverter from "./components/tools/YouTubeConverter";
 import Mp4ToMp3Converter from "./components/tools/Mp4ToMp3Converter";
+import VideoCompressorTool from "./components/tools/VideoCompressorTool";
 import AudioNotesTool from "./components/tools/AudioNotesTool";
 import NameAndTextConverter from "./components/tools/NameAndTextConverter";
 import ExcelPasswordUnlocker from "./components/tools/ExcelPasswordUnlocker";
@@ -57,6 +58,8 @@ export default function App() {
         return <YouTubeConverter />;
       case "mp4-to-mp3":
         return <Mp4ToMp3Converter />;
+      case "video-compressor":
+        return <VideoCompressorTool />;
       case "audio-notes":
         return <AudioNotesTool onActiveChange={setAudioNoteActive} />;
       case "name-text-converter":
@@ -91,6 +94,7 @@ export default function App() {
     { id: "dashboard", label: "Overview" },
     { id: "youtube-converter", label: "YouTube DL" },
     { id: "mp4-to-mp3", label: "MP4 to MP3" },
+    { id: "video-compressor", label: "Video Compress" },
     { id: "audio-notes", label: "Audio Notes" },
     { id: "name-text-converter", label: "Name & Text" },
     { id: "excel-unlocker", label: "Excel Unlock" },

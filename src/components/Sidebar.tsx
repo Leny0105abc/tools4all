@@ -12,6 +12,7 @@ import {
   HardDrive,
   Sparkles,
   ArrowLeftRight,
+  Video,
 } from "lucide-react";
 import { ToolId } from "../types";
 
@@ -60,6 +61,12 @@ export default function Sidebar({
           label: "Convert MP4 to MP3",
           icon: Music,
           badge: "Lossless",
+        },
+        {
+          id: "video-compressor" as ToolId,
+          label: "Video Compression",
+          icon: Video,
+          badge: "Local",
         },
         {
           id: "audio-notes" as ToolId,
